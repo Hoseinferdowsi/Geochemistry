@@ -45,7 +45,7 @@
   1. ریپوی git با شاخهٔ اصلی `main` در ریشهٔ پروژه ساخته شد و `.gitignore` برای حذف فایل‌های حجیم/حساس (Data با ۱.۱ گیگابایت، sessions، uploads، output، venv و…) ایجاد شد.
   2. commit اولیه با ۱۹۲ فایل (۵۱هزار خط) ساخته شد: کد وباپ، اسکریپت‌ها، قالب‌ها، مستندات و کل پوشهٔ Brain.
   3. remote به آدرس https://github.com/Hoseinferdowsi/Geochemistry.git اضافه شد.
-  4. تلاش push به دلیل خطای احراز هویت گیتهاب ناموفق ماند («Invalid username or token») — نیاز به ورود کاربر دارد.
+  4. تلاش اول push به دلیل خطای احراز هویت گیتهاب ناموفق ماند («Invalid username or token»)؛ پس از ورود کاربر از طریق پنجرهٔ Git Credential Manager، push با موفقیت انجام شد و شاخهٔ main روی گیتهاب قرار گرفت.
 - **توسط:** Buffy (Freebuff)
 
 ---
