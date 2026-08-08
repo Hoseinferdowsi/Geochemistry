@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>سیستم تحلیل داده‌های ژئوشیمی</title>
+    <style>
+        body {
+            font-family: Tahoma, Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+        }
+        h1 {
+            color: #667eea;
+            text-align: center;
+        }
+        .upload-area {
+            border: 2px dashed #667eea;
+            border-radius: 10px;
+            padding: 30px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            transform: translateY(-2px);
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f0f0f0;
+            border-radius: 8px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔬 سیستم تحلیل داده‌های ژئوشیمی</h1>
+        
+        <div class="upload-area">
+            <h3>📁 آپلود فایل Excel</h3>
+            <input type="file" id="fileInput" accept=".xlsx,.xls">
+            <br><br>
+            <div id="fileInfo"></div>
+        </div>
+        
+        <div id="sheetSection" style="display:none;">
+            <label>انتخاب شیت:</label>
+            <select id="sheetSelect"></select>
+        </div>
+        
+        <div style="margin: 20px 0;">
+            <button id="censoredBtn" disabled>🔧 تصحیح داده‌های سانسور شده</button>
+            <button id="outlierBtn" disabled>📊 شناسایی outliers</button>
+            <button id="normalBtn" disabled>📈 تحلیل نرمالیتی</button>
+        </div>
+        
+        <div id="result" class="result"></div>
+    </div>
+    
+    <script>
+        let currentFile = null;
+        let currentSheet = null;
+        
+        document.getElementById('fileInput').addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const response = await fetch('/upload', {method: 'POST', body: formData});
+            const result = await response.json();
+            
+            if (result.success) {
+                currentFile = result.filename;
+                document.getElementById('fileInfo').innerHTML = `✅ فایل آپلود شد: ${file.name}`;
+                
+                const sheetSelect = document.getElementById('sheetSelect');
+                sheetSelect.innerHTML = '<option value="">انتخاب کنید...</option>';
+                result.sheet_names.forEach(sheet => {
+                    const option = document.createElement('option');
+                    option.value = sheet;
+                    option.textContent = sheet;
+                    sheetSelect.appendChild(option);
+                });
+                document.getElementById('sheetSection').style.display = 'block';
+            } else {
+                alert('خطا: ' + result.error);
+            }
+        });
+        
+        document.getElementById('sheetSelect').addEventListener('change', function(e) {
+            currentSheet = e.target.value;
+            if (currentSheet) {
+                document.getElementById('censoredBtn').disabled = false;
+                document.getElementById('outlierBtn').disabled = false;
+                document.getElementById('normalBtn').disabled = false;
+            }
+        });
+        
+        async function process(endpoint, data) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.style.display = 'block';
+            resultDiv.innerHTML = '⏳ در حال پردازش...';
+            
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                resultDiv.innerHTML = `✅ ${result.message}<br>`;
+                if (result.output_file) {
+                    resultDiv.innerHTML += `<a href="/download/${result.output_file}" target="_blank">📥 دانلود فایل خروجی</a>`;
+                }
+            } else {
+                resultDiv.innerHTML = `❌ خطا: ${result.error}`;
+            }
+        }
+        
+        document.getElementById('censoredBtn').onclick = () => {
+            process('/process_censored_data', {
+                filename: currentFile,
+                sheet_name: currentSheet
+            });
+        };
+        
+        document.getElementById('outlierBtn').onclick = () => {
+            process('/process_outliers', {
+                filename: currentFile,
+                sheet_name: currentSheet,
+                method: 'iqr_enhanced'
+            });
+        };
+        
+        document.getElementById('normalBtn').onclick = () => {
+            process('/process_normal_distribution', {
+                filename: currentFile,
+                sheet_name: currentSheet
+            });
+        };
+    </script>
+</body>
+</html>

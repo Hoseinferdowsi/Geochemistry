@@ -1,0 +1,31 @@
+# ===== Freebuff / ابزارهای محلی =====
+.freebuff/
+.cursor/
+desktop-v2.db
+desktop-v2.db-shm
+desktop-v2.db-wal
+
+# ===== Python =====
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ===== داده‌ها و خروجی‌های runtime (حجم زیاد / حساس) =====
+Data/
+uploads/
+output/
+sessions/
+anomaly_analysis/
+element_distribution_maps/
+normalized_results/
+*.log
+
+# ===== سیستم‌عامل =====
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# ===== IDE =====
+.vscode/
+.idea/

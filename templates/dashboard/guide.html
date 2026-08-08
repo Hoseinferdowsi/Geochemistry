@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>راهنمای استفاده</title>
+
+    <style>
+        @font-face {
+            font-family: 'IRANSansWeb';
+            src: url("{{ url_for('static', filename='fonts/IRANSansWeb.woff') }}") format('woff');
+            font-weight: normal;
+            font-style: normal;
+        }
+
+        body {
+            font-family: 'IRANSansWeb', sans-serif !important;
+            text-align: right;
+        }
+
+        .guide-section {
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            margin-top: 20px;
+            text-align: right;
+        }
+
+        .guide-content {
+            text-align: right;
+            direction: rtl;
+        }
+
+        .guide-section h3 {
+            color: #0d6efd;
+            margin-bottom: 15px;
+            text-align: right;
+        }
+
+        .guide-section ul {
+            padding-right: 20px;
+            margin-right: 0;
+            list-style-position: outside;
+            text-align: right;
+        }
+
+        .guide-section li {
+            margin-bottom: 10px;
+            text-align: right;
+        }
+
+        .guide-section ol {
+            padding-right: 20px;
+            margin-right: 0;
+            list-style-position: outside;
+            text-align: right;
+        }
+
+        .contributors {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #dee2e6;
+            text-align: right;
+        }
+
+        .contributors h4 {
+            color: #6c757d;
+            margin-bottom: 15px;
+            text-align: right;
+        }
+
+        .return-button {
+            display: inline-block;
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 8px 15px;
+            color: #6c757d;
+            text-decoration: none;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+        }
+
+        .return-button:hover {
+            background-color: #e9ecef;
+            color: #495057;
+            text-decoration: none;
+        }
+
+        .return-button i {
+            margin-left: 5px;
+        }
+
+        .guide-section p, .guide-section ul, .guide-section ol {
+            max-width: 800px;
+            text-align: right;
+        }
+
+        .navbar-logo {
+            width: 125px;
+            height: auto;
+            margin-left: 20px;
+            object-fit: contain;
+        }
+
+        .navbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            flex-wrap: nowrap;
+        }
+
+        .navbar-brand {
+            flex: 1;
+            text-align: right;
+        }
+    </style>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/bootstrap.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/tooplate.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+</head>
+
+<body id="reportsPage">
+    <div class="" id="home">
+        <div class="container">
+            <div class="row">
+                <div class="col-12">
+                    <nav class="navbar navbar-expand-xl navbar-light bg-light">
+                        <a class="navbar-brand" href="/">
+                            <h1 class="tm-site-title mb-0">تحلیل خطا در نمونه‌های تکراری</h1>
+                        </a>
+                        <img src="{{ url_for('static', filename='img/logo.jpg') }}" alt="لوگوی سازمان" class="navbar-logo" style="width: 80px; height: 80px;">
+                        <button class="navbar-toggler ml-auto mr-0" type="button" data-toggle="collapse" data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent"
+                            aria-expanded="false" aria-label="Toggle navigation">
+                            <span class="navbar-toggler-icon"></span>
+                        </button>
+
+                        <div class="collapse navbar-collapse" id="navbarSupportedContent">
+                            <ul class="navbar-nav mx-auto">
+                                <li class="nav-item dropdown">
+                                    <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                                        داشبورد
+                                    </a>
+                                    <div class="dropdown-menu" aria-labelledby="navbarDropdown">
+                                        <a class="dropdown-item" href="/sample_file">فایل ورودی نمونه</a>
+                                        <a class="dropdown-item active" href="/guide">راهنما</a>
+                                    </div>
+                                </li>
+                            </ul>
+                        </div>
+                    </nav>
+                </div>
+            </div>
+            
+            <div class="row tm-content-row tm-mt-big">
+                <div class="col-12">
+                    <div class="guide-section">
+                        <div class="guide-content">
+                            <a href="/" class="return-button">
+                                <i class="fas fa-arrow-right"></i>
+                                بازگشت به صفحه اصلی
+                            </a>
+                            <h3>راهنمای استفاده از نرم‌افزار</h3>
+                            <h4>ساختار فایل ورودی</h4>
+                            <p>فایل ورودی باید یک فایل اکسل با دو شیت زیر باشد:</p>
+                            <ul>
+                                <li>
+                                    <strong>Duplicate Samples:</strong> شامل دو ستون:
+                                    <ul>
+                                        <li>Sample_ID: شناسه نمونه اصلی</li>
+                                        <li>Duplicated_Sample_ID: شناسه نمونه تکراری</li>
+                                    </ul>
+                                </li>
+                                <li>
+                                    <strong>Duplicate_Data:</strong> شامل:
+                                    <ul>
+                                        <li>ستون Sample_ID: شناسه نمونه</li>
+                                        <li>ستون‌های عناصر: مقادیر آنالیز هر عنصر بصورت عددی </li>
+                                    </ul>
+                                </li>
+                            </ul>
+
+                            <h4 class="mt-4">نحوه استفاده</h4>
+                            <ol>
+                                <li>فایل اکسل خود را در ناحیه مشخص شده رها کنید یا با کلیک روی آن فایل را انتخاب کنید.</li>
+                                <li>پس از آپلود، نرم‌افزار به طور خودکار تحلیل‌های زیر را انجام می‌دهد:
+                                    <ul>
+                                        <li>محاسبه RPD برای هر عنصر</li>
+                                        <li>دسته‌بندی کیفیت عناصر</li>
+                                        <li>ایجاد نمودارهای تحلیلی</li>
+                                    </ul>
+                                </li>
+                                <li>نتایج را می‌توانید به صورت:
+                                    <ul>
+                                        <li>فایل اکسل حاوی آمار تفصیلی</li>
+                                        <li>مجموعه نمودارهای تحلیلی</li>
+                                    </ul>
+                                    دانلود کنید.
+                                </li>
+                            </ol>
+
+                            <h4 class="mt-4">معیارهای دسته‌بندی کیفیت</h4>
+                            <ul>
+                                <li><strong>خوب:</strong> 90% نمونه‌ها دارای خطای کمتر از 10% و 99% نمونه‌ها دارای خطای کمتر از 20%</li>
+                                <li><strong>قابل قبول:</strong> 70% نمونه‌ها دارای خطای کمتر از 10% و 95% نمونه‌ها دارای خطای کمتر از 20%</li>
+                                <li><strong>ضعیف:</strong> خطای بیش از مقادیر ذکر شده در آیتم قبل</li>
+                            </ul>
+
+                            <div class="contributors">
+                                <h4>تهیه‌کنندگان:</h4>
+                                <p>حسین فردوسی، حسن موسوی، حسن عزمی، مهدی آزادی</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <footer class="row tm-mt-small">
+                <div class="col-12 font-weight-light">
+                    <p class="d-inline-block tm-bg-black text-white py-2 px-4">
+                        کلیه حقوق مادی و معنوی متعلق به سازمان زمین‌شناسی و اکتشافات معدنی کشور می‌باشد
+                        &copy; ۱۴۰۳
+                    </p>
+                </div>
+            </footer>
+        </div>
+    </div>
+    <script src="{{ url_for('static', filename='js/jquery-3.3.1.min.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/bootstrap.min.js') }}"></script>
+</body>
+</html> 

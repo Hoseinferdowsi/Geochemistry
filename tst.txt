@@ -1,0 +1,76 @@
+def create_log_thompson_howarth_plot(means, abs_diffs, element, mean_rpd, output_path):
+    """Create Thompson-Howarth plot with logarithmic scales"""
+    plt.figure(figsize=(10, 10))
+    
+    # Filter out zero values
+    valid_indices = [i for i, (m, d) in enumerate(zip(means, abs_diffs)) if m > 0 and d > 0]
+    if not valid_indices:
+        print(f"Warning: No valid (non-zero) data points for {element}")
+        plt.close()
+        return
+        
+    valid_means = [means[i] for i in valid_indices]
+    valid_diffs = [abs_diffs[i] for i in valid_indices]
+    
+    # Calculate axis limits
+    min_mean = np.min(valid_means)
+    max_mean = np.max(valid_means)
+    min_diff = np.min(valid_diffs)
+    max_diff = np.max(valid_diffs)
+    
+    # Set default x-axis limits
+    x_min = 0.1
+    x_max = 10000
+    
+    # Adjust x-axis limits if data falls outside the range
+    if min_mean < x_min:
+        x_min = 10 ** np.floor(np.log10(min_mean))
+    if max_mean > x_max:
+        x_max = 10 ** np.ceil(np.log10(max_mean))
+    
+    # Set default y-axis limits
+    y_min = 0.01
+    y_max = 1000
+    
+    # Adjust y-axis limits if data falls outside the range
+    if min_diff < y_min:
+        y_min = 10 ** np.floor(np.log10(min_diff))
+    if max_diff > y_max:
+        y_max = 10 ** np.ceil(np.log10(max_diff))
+    
+    # Create scatter plot
+    plt.scatter(valid_means, valid_diffs, alpha=0.6, s=100)
+    
+    # Create x values for plotting error lines
+    x_reg = np.logspace(np.log10(x_min), np.log10(x_max), 100)
+    
+    # Add 10% and 20% error lines
+    plt.plot(x_reg, x_reg * 0.1, 'g:', label='10% Error', linewidth=1.5)
+    plt.plot(x_reg, x_reg * 0.2, 'b:', label='20% Error', linewidth=1.5)
+    
+    plt.xscale('log')
+    plt.yscale('log')
+    
+    plt.grid(True, which="both", ls="-", alpha=0.2)
+    plt.xlabel(f'Mean Concentration ({element})', fontsize=12)
+    plt.ylabel('Absolute Difference', fontsize=12)
+    
+    # Add text box with statistics at top left
+    stats_text = f'Mean RPD: {mean_rpd:.1f}%'
+    plt.text(0.02, 0.98, stats_text, 
+            transform=plt.gca().transAxes,
+            bbox=dict(facecolor='white', alpha=0.8),
+            verticalalignment='top',
+            fontsize=10)
+    
+    # Move legend to the left side below Mean RPD text box
+    plt.legend(loc='upper left', bbox_to_anchor=(0.02, 0.90),
+              fontsize=10, framealpha=0.8)
+    
+    # Set axis limits
+    plt.xlim(x_min, x_max)
+    plt.ylim(y_min, y_max)
+    
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()

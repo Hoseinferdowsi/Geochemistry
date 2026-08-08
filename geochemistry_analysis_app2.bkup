@@ -1,0 +1,394 @@
+from flask import Flask, render_template, request, send_file, jsonify, flash, redirect, url_for
+import os
+import pandas as pd
+import numpy as np
+from werkzeug.utils import secure_filename
+from datetime import datetime
+import json
+import zipfile
+import io
+import traceback
+import re
+
+app = Flask(__name__)
+app.secret_key = 'geochemistry_analysis_secret_key_2024'
+app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
+ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def create_output_directory():
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_dir = os.path.join('output', timestamp)
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir, timestamp
+
+def identify_element_columns(df):
+    """Identify which columns are geochemical elements vs metadata"""
+    metadata_patterns = ['sample', 'id', 'x', 'y', 'coord', 'easting', 'northing', 'depth', 'from', 'to']
+    element_cols = []
+    metadata_cols = []
+    
+    for col in df.columns:
+        col_lower = col.lower()
+        if any(pattern in col_lower for pattern in metadata_patterns):
+            metadata_cols.append(col)
+        else:
+            # Assume other numeric columns are elements
+            if pd.api.types.is_numeric_dtype(df[col]) or df[col].dtype == 'object':
+                element_cols.append(col)
+    
+    return element_cols, metadata_cols
+
+def process_censored_sophisticated(df, method='adaptive'):
+    """
+    Advanced censored data processing with multiple strategies
+    """
+    processed_df = df.copy()
+    changes_log = []
+    
+    # Identify columns with censored data
+    censored_pattern = re.compile(r'[<>]\s*\d+(\.\d+)?')
+    
+    for col in df.columns:
+        # Skip metadata columns
+        if col.lower() in ['sample_id', 'sampleid', 'id', 'x', 'y', 'easting', 'northing']:
+            continue
+            
+        col_changes = 0
+        
+        for idx in df.index:
+            val = df.loc[idx, col]
+            
+            # Skip non-string values
+            if not isinstance(val, str):
+                continue
+            
+            match = censored_pattern.match(str(val).strip())
+            if not match:
+                # Try to convert to float if possible
+                try:
+                    processed_df.loc[idx, col] = float(val)
+                except:
+                    pass
+                continue
+            
+            # Parse censored value
+            sign = match.group(1)
+            number = float(match.group(2))
+            
+            # Smart replacement strategies
+            if method == 'adaptive':
+                # Get column statistics for adaptive replacement
+                col_data = pd.to_numeric(df[col].replace(['<', '>'], np.nan), errors='coerce')
+                
+                if sign == '<':
+                    # Below detection limit - replace with DL/2 or DL/√2
+                    if number > 0:
+                        # Common in geochemistry: DL/2 for below detection
+                        new_val = number / 2
+                        
+                        # For ultra-trace elements, use DL/√2 (more conservative)
+                        if number < 0.01:
+                            new_val = number / np.sqrt(2)
+                else:  # '>'
+                    # Above upper limit - use DL or estimate from distribution
+                    if len(col_data.dropna()) > 5:
+                        # Estimate using 95th percentile if available
+                        p95 = col_data.quantile(0.95)
+                        new_val = min(number, p95 * 1.1)  # Cap at 110% of p95
+                    else:
+                        new_val = number
+            
+            elif method == 'half_dl':
+                # Simple DL/2 method
+                new_val = number / 2 if sign == '<' else number
+                
+            elif method == 'dl_sqrt2':
+                # DL/√2 method (more sophisticated)
+                new_val = number / np.sqrt(2) if sign == '<' else number
+                
+            else:  # 'keep' - don't modify, just flag
+                new_val = val
+            
+            if new_val != val:
+                processed_df.loc[idx, col] = new_val
+                col_changes += 1
+                changes_log.append({
+                    'column': col,
+                    'row': idx,
+                    'original': val,
+                    'new': new_val,
+                    'method': method
+                })
+        
+        if col_changes > 0:
+            print(f"Column {col}: {col_changes} censored values processed")
+    
+    return processed_df, changes_log
+
+def detect_outliers_geochemical(data, method='iqr_enhanced', multiplier=1.5):
+    """
+    Geochemically-aware outlier detection
+    Not all outliers are errors - some are mineralized zones!
+    """
+    if len(data) < 4:
+        return pd.Series([False] * len(data), index=data.index), data.copy()
+    
+    data_clean = data.dropna()
+    if len(data_clean) == 0:
+        return pd.Series([False] * len(data), index=data.index), data.copy()
+    
+    outliers = pd.Series([False] * len(data), index=data.index)
+    replacement_values = data.copy()
+    
+    if method == 'iqr_enhanced':
+        # Enhanced IQR with log transformation for skewed data
+        Q1 = data_clean.quantile(0.25)
+        Q3 = data_clean.quantile(0.75)
+        IQR = Q3 - Q1
+        
+        # For geochemical data, use asymmetric thresholds (positive skew typical)
+        lower_bound = Q1 - multiplier * IQR
+        upper_bound = Q3 + multiplier * IQR
+        
+        # But also check log-space for better detection
+        try:
+            log_data = np.log10(data_clean[data_clean > 0])
+            if len(log_data) > 3:
+                log_Q1 = log_data.quantile(0.25)
+                log_Q3 = log_data.quantile(0.75)
+                log_IQR = log_Q3 - log_Q1
+                log_upper = 10 ** (log_Q3 + 2 * log_IQR)
+                upper_bound = min(upper_bound, log_upper)
+        except:
+            pass
+        
+        outlier_mask = (data < lower_bound) | (data > upper_bound)
+        outliers[outlier_mask] = True
+        
+        # Replace outliers with median of non-outliers
+        non_outlier_median = data_clean[~outlier_mask].median()
+        replacement_values[outlier_mask] = non_outlier_median
+        
+    elif method == 'mad':
+        # Median Absolute Deviation - robust for skewed data
+        median = data_clean.median()
+        mad = np.median(np.abs(data_clean - median))
+        modified_z_scores = 0.6745 * (data_clean - median) / mad if mad > 0 else np.zeros_like(data_clean)
+        outlier_mask_clean = np.abs(modified_z_scores) > multiplier
+        
+        outlier_indices = data_clean.index[outlier_mask_clean]
+        outliers[outlier_indices] = True
+        replacement_values[outlier_indices] = median
+        
+    elif method == 'isolation':
+        # Use percentile-based method (more conservative)
+        p01 = data_clean.quantile(0.01)
+        p99 = data_clean.quantile(0.99)
+        outlier_mask = (data < p01) | (data > p99)
+        outliers[outlier_mask] = True
+        replacement_values[outlier_mask] = data_clean.median()
+    
+    return outliers, replacement_values
+
+@app.route('/')
+def index():
+    return render_template('geochemistry_analysis.html')
+
+@app.route('/process_censored_data', methods=['POST'])
+def process_censored_data_route():
+    try:
+        data = request.get_json()
+        filename = data.get('filename')
+        sheet_name = data.get('sheet_name')
+        method = data.get('method', 'adaptive')  # adaptive, half_dl, dl_sqrt2, keep
+        
+        if not filename or not sheet_name:
+            return jsonify({'error': 'نام فایل و نام شیت الزامی است'}), 400
+        
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        if not os.path.exists(filepath):
+            return jsonify({'error': 'فایل یافت نشد'}), 404
+        
+        output_dir, timestamp = create_output_directory()
+        
+        try:
+            # Read the original file
+            df = pd.read_excel(filepath, sheet_name=sheet_name, engine='openpyxl')
+            
+            # Process censored data with sophisticated method
+            processed_df, changes_log = process_censored_sophisticated(df, method=method)
+            
+            # Save processed file
+            output_filename = f"censored_data_processed_{timestamp}.xlsx"
+            output_path = os.path.join(output_dir, output_filename)
+            processed_df.to_excel(output_path, index=False)
+            
+            # Save changes log
+            if changes_log:
+                changes_df = pd.DataFrame(changes_log)
+                changes_log_filename = f"censored_changes_log_{timestamp}.xlsx"
+                changes_log_path = os.path.join(output_dir, changes_log_filename)
+                changes_df.to_excel(changes_log_path, index=False)
+            
+            # Generate summary statistics
+            censored_columns = list(set([log['column'] for log in changes_log]))
+            
+            return jsonify({
+                'success': True,
+                'message': f'پردازش داده‌های سانسور شده با روش {method} انجام شد',
+                'output_file': output_filename,
+                'output_dir': timestamp,
+                'changes_count': len(changes_log),
+                'censored_columns': censored_columns,
+                'original_rows': len(df),
+                'original_cols': len(df.columns),
+                'changes_log_file': changes_log_filename if changes_log else None
+            })
+            
+        except Exception as e:
+            return jsonify({'error': f'خطا در پردازش داده‌های سانسور شده: {str(e)}'}), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'خطای سرور: {str(e)}'}), 500
+
+@app.route('/process_outliers', methods=['POST'])
+def process_outliers_route():
+    try:
+        data = request.get_json()
+        filename = data.get('filename')
+        sheet_name = data.get('sheet_name')
+        method = data.get('method', 'iqr_enhanced')
+        multiplier = data.get('multiplier', 1.5)
+        action = data.get('action', 'flag')  # flag, replace, winsorize, keep
+        
+        if not filename or not sheet_name:
+            return jsonify({'error': 'نام فایل و نام شیت الزامی است'}), 400
+        
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        if not os.path.exists(filepath):
+            return jsonify({'error': 'فایل یافت نشد'}), 404
+        
+        output_dir, timestamp = create_output_directory()
+        
+        try:
+            # Read the original file
+            df = pd.read_excel(filepath, sheet_name=sheet_name)
+            processed_df = df.copy()
+            outlier_summary = []
+            
+            # Identify element columns (skip metadata)
+            element_cols, metadata_cols = identify_element_columns(df)
+            
+            # Process only numeric element columns
+            for column in element_cols:
+                if not pd.api.types.is_numeric_dtype(df[column]):
+                    continue
+                
+                original_data = df[column].copy()
+                
+                # Detect outliers
+                outliers, replacement_vals = detect_outliers_geochemical(
+                    df[column], 
+                    method=method,
+                    multiplier=multiplier
+                )
+                
+                outlier_count = outliers.sum()
+                
+                if outlier_count > 0:
+                    if action == 'replace':
+                        processed_df.loc[outliers, column] = replacement_vals[outliers]
+                        outlier_summary.append({
+                            'column': column,
+                            'outlier_count': int(outlier_count),
+                            'outlier_indices': outliers[outliers].index.tolist(),
+                            'original_values': original_data[outliers].tolist(),
+                            'replacement_values': replacement_vals[outliers].tolist(),
+                            'action': 'replaced'
+                        })
+                    elif action == 'flag':
+                        # Add flag column
+                        flag_col = f"{column}_outlier_flag"
+                        processed_df[flag_col] = outliers.astype(int)
+                        outlier_summary.append({
+                            'column': column,
+                            'outlier_count': int(outlier_count),
+                            'outlier_indices': outliers[outliers].index.tolist(),
+                            'action': 'flagged'
+                        })
+                    elif action == 'winsorize':
+                        # Winsorize at percentile
+                        p01 = original_data.quantile(0.01)
+                        p99 = original_data.quantile(0.99)
+                        processed_df[column] = original_data.clip(p01, p99)
+                        outlier_summary.append({
+                            'column': column,
+                            'outlier_count': int(outlier_count),
+                            'action': 'winsorized'
+                        })
+            
+            # Save processed file
+            output_filename = f"outliers_processed_{method}_{action}_{timestamp}.xlsx"
+            output_path = os.path.join(output_dir, output_filename)
+            processed_df.to_excel(output_path, sheet_name=sheet_name, index=False)
+            
+            # Save outlier summary
+            if outlier_summary:
+                summary_df = pd.DataFrame(outlier_summary)
+                summary_filename = f"outlier_summary_{timestamp}.xlsx"
+                summary_path = os.path.join(output_dir, summary_filename)
+                summary_df.to_excel(summary_path, index=False)
+            
+            total_outliers = sum([item['outlier_count'] for item in outlier_summary])
+            
+            return jsonify({
+                'success': True,
+                'message': f'پردازش مقادیر پرت با روش {method} انجام شد',
+                'output_file': output_filename,
+                'output_dir': timestamp,
+                'method': method,
+                'action': action,
+                'total_outliers': total_outliers,
+                'affected_columns': len(outlier_summary),
+                'outlier_summary_file': summary_filename if outlier_summary else None
+            })
+            
+        except Exception as e:
+            return jsonify({'error': f'خطا در پردازش مقادیر پرت: {str(e)}'}), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'خطای سرور: {str(e)}'}), 500
+
+# ... (بقیه کدها مانند قبل)
+@app.route('/test')
+def test():
+    return """
+    <html>
+        <body>
+            <h1>Server is Working!</h1>
+            <p>If you see this, Flask is running correctly.</p>
+            <p>Templates folder: {} exists</p>
+        </body>
+    </html>
+    """.format(os.path.exists('templates'))
+    
+if __name__ == '__main__':
+    # Create necessary directories
+    os.makedirs('uploads', exist_ok=True)
+    os.makedirs('output', exist_ok=True)
+    
+    # Print debug information
+    print("="*50)
+    print("Server Information:")
+    print(f"Current directory: {os.getcwd()}")
+    print(f"Templates folder exists: {os.path.exists('templates')}")
+    print(f"HTML file exists: {os.path.exists('templates/geochemistry_analysis.html')}")
+    print("="*50)
+    
+    # Run the app
+    app.run(debug=True, host='0.0.0.0', port=5000)
+   
