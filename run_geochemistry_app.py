@@ -21,7 +21,7 @@ def main():
     print("=" * 60)
     print("📁 Uploads directory: ./uploads")
     print("📁 Output directory: ./output")
-    print("🌐 Web interface: http://localhost:5000")
+    print("🌐 Web interface: http://localhost:5001")
     print("=" * 60)
     print("🚀 Starting Flask application...")
     print("Press Ctrl+C to stop the server")
@@ -30,8 +30,8 @@ def main():
     try:
         app.run(
             debug=True,
-            host='0.0.0.0',
-            port=5000,
+            host='127.0.0.1',
+            port=5001,
             threaded=True
         )
     except KeyboardInterrupt:

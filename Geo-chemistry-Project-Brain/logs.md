@@ -49,4 +49,97 @@
 - **توسط:** Buffy (Freebuff)
 
 ---
+
+## اصلاح طرح‌های فاز ۱ در roadmap (نگهداری دو اپ + انتقال به backup)
+
+- **تاریخ و ساعت:** ۲۰۲۶-۰۸-۰۸ — 07:18
+- **توضیحات:**
+  1. طرح R1 به‌روزرسانی شد: تصمیم گرفته شد `geochemistry_analysis_app.py` و `app.py` **هر دو حفظ شوند** و ترکیب آن‌ها به یک اپ واحد به‌عنوان اولویت پایین ثبت شود.
+  2. در R1 نسخه‌های موازی حذف‌شدنی تصریح شد: `geochemistry_analysis_app2.bkup` و `geochemistry_analysis_app2_old.bkup`، قالب‌های تکراری `geochemistry_analysis_2.html` و `geochemistry_analysis_edited.html`، و اسکریپت‌های تکراری `read_duplicates_bkup.py` و `_read_duplicates.py` (فقط `read_duplicate_parallel.py` حفظ می‌شود).
+  3. طرح R2 اصلاح شد: به‌جای حذف اسکریپت‌های مستقلِ دوباره‌پیاده‌سازی‌شده (`Censored_Data.py`، `normalization_process.py`، `Draw_Plot.py`) آن‌ها به پوشهٔ `backup` منتقل شوند (بعد از اطمینان از پوشش کامل قابلیت‌ها در `processing_services.py`).
+  4. هر دو طرح همچنان با اولویت بالا و وضعیت باز باقی ماندند؛ منبع هر دو بازبینی ۲۰۲۶-۰۸-۰۸ است.
+- **توسط:** Buffy (Freebuff)
+
+---
+
+## اجرای فاز ۱ — یکپارچه‌سازی و پاکسازی (R1 + R2)
+
+- **تاریخ و ساعت:** ۲۰۲۶-۰۸-۰۸ — 07:22
+- **توضیحات:**
+  1. **R1 — حذف نسخه‌های تکراری:** قبل از حذف، ارجاع‌ها در کل کدبیس بررسی شد (grep و code-search برای import، render_template، subprocess و فایل‌های bat/md) و هیچ ارجاع فعالی یافت نشد. سپس با `git rm` حذف شدند: `geochemistry_analysis_app2.bkup`، `geochemistry_analysis_app2_old.bkup`، `templates/geochemistry_analysis_2.html`، `templates/geochemistry_analysis_edited.html`، `read_duplicates_bkup.py`، `_read_duplicates.py`.
+  2. **R2 — انتقال به backup:** پوشهٔ `backup/` ساخته شد و با `git mv` سه اسکریپت مستقلِ دوباره‌پیاده‌سازی‌شده به آن منتقل شدند: `Censored_Data.py`، `normalization_process.py`، `Draw_Plot.py` (کدها حفظ شدند و قابل بازیابی‌اند).
+  3. **مقایسهٔ پوشش قابلیت‌ها:** هستهٔ هر سه اسکریپت با `processing_services.py` مقایسه و پوشش کامل تأیید شد: سانسور (process_censored_data)، شش تبدیل نرمال + آزمون Shapiro-Wilk/چولگی/کورتوز و انتخاب بهترین روش (process_normalization)، و IDW/griddata + نقشه‌های توزیع و heatmap همبستگی (process_plots). موارد خارج از پوشش ثبت شد: ضریب ۱.۳۳ (باگ R4)، نمودارهای مقایسه‌ای هیستوگرام/QQ و ستون‌های Improvement، و cmap خودکار با LogNorm.
+  4. **تأیید نهایی:** فایل‌های باقی‌مانده (دو اپ، `read_duplicate_parallel.py`، `processing_services.py`، `outliers.py`، قالب اصلی) سالم‌اند و `python -m py_compile` روی همهٔ آن‌ها بدون خطا گذشت. وضعیت R1 و R2 در roadmap به «انجام شد» تغییر کرد.
+- **توسط:** Buffy (Freebuff)
+
+---
+
+## حذف دستی `_geochemical_analysis.py` توسط کاربر
+
+- **تاریخ و ساعت:** ۲۰۲۶-۰۸-۰۸ — 07:25
+- **توضیحات:**
+  1. کاربر فایل `_geochemical_analysis.py` (نسخهٔ موازیِ اسکریپت تحلیل ژئوشیمی در ریشهٔ پروژه) را به‌صورت دستی از دیسک حذف کرد.
+  2. تأیید شد که فایل روی دیسک وجود ندارد و در کل کدبیس (کد، bat، مستندات) هیچ ارجاعی به آن نیست.
+  3. حذف در git به‌صورت unstaged (` D`) ظاهر شده بود و با `git add` به‌همراه بقیهٔ تغییرات فاز ۱ stage شد.
+  4. این حذف در ادامهٔ طرح R1 (حذف نسخه‌های تکراری) قرار می‌گیرد و تغییری در roadmap لازم نیست.
+- **توسط:** Buffy (Freebuff)
+
+---
+
+## انتقال رابط دسکتاپی (GUI) به پوشهٔ Geochemistry_GUI
+
+- **تاریخ و ساعت:** ۲۰۲۶-۰۸-۰۸ — 07:30
+- **توضیحات:**
+  1. `gui_app.py` (رابط PyQt5 دسکتاپی با ارجاع خراب به `read_duplicates.py`) به پوشهٔ جدید `Geochemistry_GUI/` منتقل شد تا خارج از پروژه نگهداری شود.
+  2. پوشهٔ GUI خودکفا شد: `requirements.txt` مستقل (PyQt5 و کتابخانه‌های پایه) و یک README راهنما ساخته شد؛ README ارجاع خراب و نحوهٔ اتصال به `read_duplicate_parallel.py` را توضیح می‌دهد.
+  3. وابستگی‌های PyQt5 (`PyQt5`، `PyQt5-Qt5`، `PyQt5_sip`) از `requirements.txt` اصلی حذف و `requirements.txt` به کدینگ UTF-8 تبدیل شد.
+  4. roadmap به‌روزرسانی شد: R3 (رویکرد جدید: انتقال به‌جای رفع ارجاع) و R5 (کدینگ + تفکیک وابستگی‌ها) هر دو «انجام شد» شدند. فایل‌های مشترک (`read_duplicate_parallel.py` و `sample_input.xlsx`) در پروژهٔ اصلی ماندند چون وباپ به آن‌ها نیاز دارد.
+- **توسط:** Buffy (Freebuff)
+
+---
+
+## اجرای R6 — حذف مسیرهای هاردکد در اسکریپت‌ها
+
+- **تاریخ و ساعت:** ۲۰۲۶-۰۹-۰۵ — 04:40
+- **توضیحات:**
+  1. `Anomaly_Detection.py`: مسیر هاردکد `D:/03_AI/AI_Programming/Geochemistry_v3.1/Data/Kashmar_censored_processed.xlsx` حذف شد و تابع `main()` با argparse بازنویسی شد (--input, --output).
+  2. `convert_standard_scale.py`: مسیر هاردکد `D:/03_AI/AI_Programming/Geochemistry_v3.0/Data` حذف شد و اسکریپت با argparse بازنویسی شد (--input, --output-dir).
+  3. بررسی نهایی تأیید کرد هیچ مسیر هاردکدی در فایل‌های پروژه (بدون venv و backup) باقی نمانده است.
+  4. وضعیت R6 در roadmap به «انجام شد» تغییر کرد.
+- **توسط:** Buffy (Freebuff)
+
+---
+
+## اجرای R13 — جابجایی تب «توزیع نرمال» و افزودن تب «جداسازی آنومالی‌ها»
+
+- **تاریخ و ساعت:** ۲۰۲۶-۰۹-۰۵ — 05:06
+- **توضیحات:**
+  1. تب «توزیع نرمال» (نرمال‌سازی) از جایگاه ۴ به جایگاه ۶ (بعد از رسم نمودار) منتقل شد.
+  2. تب جدید «جداسازی آنومالی‌ها» در جایگاه ۴ (قبل از رسم نمودار) اضافه شد.
+  3. تب جدید شامل ۳ روش جداسازی است:
+     - کلاسیک: Mean ± n×SD
+     - جعبه‌ای: Box Plot (Q1 - k×IQR, Q3 + k×IQR)
+     - فرکتالی: Concentration-Number (C-N)
+  4. ترتیب جدید تب‌ها: آپلود → سنسورد → Outliers → جداسازی آنومالی‌ها → رسم نمودار → توزیع نرمال → چندفاکتوری
+  5. تابع `process_anomaly_separation` به `processing_services.py` و route مربوطه به `geochemistry_analysis_app.py` اضافه شد.
+  6. هر دو فایل با `py_compile` تأیید شدند.
+- **توسط:** Buffy (Freebuff)
+
+---
+
+### ۶. بهبود ایندیکیتور بالای صفحه و افزودن کلاس‌های آنومالی
+- **تاریخ:** ۲۰۲۶-۰۹-۰۵ ۱۰:۰۰
+- **توضیحات:**
+  1. ایندیکیتور pipeline status bar در بالای صفحه اصلاح شد: آیتم «جداسازی آنومالی» اضافه و «نرمال‌سازی» بعد از «نمودارها» قرار گرفت.
+  2. تابع JS `updatePipelineStatus` برای شامل کردن مرحله `anomaly` به‌روزرسانی شد.
+  3. در تب جداسازی آنومالی‌ها، دو کلاس برای آنومالی‌ها تعریف شد:
+     - آنومالی خفیف (Light Anomaly): مقادیر بین آستانه اول و دوم
+     - آنومالی شدید (Strong Anomaly): مقادیر بالاتر از آستانه دوم
+  4. برای هر سه روش (کلاسیک، جعبه‌ای، فرکتالی) دو پارامتر جداگانه (خفیف/شدید) در فرم اضافه شد.
+  5. بک‌اند (`processing_services.py`) و route (`geochemistry_analysis_app.py`) برای دریافت و پردازش دو کلاس به‌روزرسانی شد.
+  6. نتایج در جدول با ستون‌های «خفیف»، «شدید»، «کل» و «آستانه» هر کلاس نمایش داده می‌شود.
+  7. هر سه فایل (`processing_services.py`، `geochemistry_analysis_app.py`، `templates/geochemistry_analysis.html`) تأیید شدند.
+- **توسط:** Buffy (Freebuff)
+
+---
 </div>

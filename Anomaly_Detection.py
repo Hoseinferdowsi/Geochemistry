@@ -505,8 +505,13 @@ def plot_anomaly_maps(df, element_cols, anomaly_results, x_col=None, y_col=None,
 # ==================================================
 
 def main():
-    # مسیر فایل
-    file_path = Path('D:/03_AI/AI_Programming/Geochemistry_v3.1/Data/Kashmar_censored_processed.xlsx')
+    import argparse
+    parser = argparse.ArgumentParser(description='Anomaly Detection Analysis')
+    parser.add_argument('--input', type=str, required=True, help='Path to input Excel file')
+    parser.add_argument('--output', type=str, default='anomaly_analysis', help='Output directory')
+    args = parser.parse_args()
+    
+    file_path = Path(args.input)
     
     # خواندن داده
     df, element_cols = load_data(file_path)

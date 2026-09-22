@@ -141,6 +141,14 @@
         .method-option:hover { border-color: #3498db; background: #f8f9fa; }
         .method-option.selected { border-color: #3498db; background: #e3f2fd; color: #2980b9; }
 
+        /* Multifactor sub-tabs */
+        #multifactorSubTabs .nav-link { background: #f0f0f0; color: #555; border: none; margin: 2px; border-radius: 6px; font-size: 0.85rem; padding: 6px 14px; }
+        #multifactorSubTabs .nav-link.active { background: #3498db; color: white; }
+        #multifactorSubTabs .nav-link:hover { background: #d6eaf8; color: #2c3e50; }
+        #multifactorSubTabs .nav-link.active:hover { background: #2980b9; }
+        .multifactor-subtab table { font-size: 0.82rem; }
+        .multifactor-subtab table th { background: #f8f9fa; font-weight: 600; }
+
         .pipeline-status {
             display: flex;
             gap: 8px;
@@ -236,10 +244,12 @@
             <!-- Pipeline status bar -->
             <div class="pipeline-status" id="pipelineStatus">
                 <span class="pipeline-step" id="status-upload"><i class="fas fa-upload"></i> آپلود</span>
-                <span class="pipeline-step" id="status-censored"><i class="fas fa-filter"></i> سانسور</span>
+                <span class="pipeline-step" id="status-censored"><i class="fas fa-filter"></i> سنسورد</span>
                 <span class="pipeline-step" id="status-outliers"><i class="fas fa-exclamation-triangle"></i> Outliers</span>
-                <span class="pipeline-step" id="status-normalization"><i class="fas fa-bell-curve"></i> نرمال‌سازی</span>
+                <span class="pipeline-step" id="status-anomaly"><i class="fas fa-crosshairs"></i> جداسازی آنومالی</span>
+                <span class="pipeline-step" id="status-statistics"><i class="fas fa-calculator"></i> آمار توصیفی</span>
                 <span class="pipeline-step" id="status-plots"><i class="fas fa-map"></i> نمودارها</span>
+                <span class="pipeline-step" id="status-normalization"><i class="fas fa-bell-curve"></i> نرمال‌سازی</span>
                 <span class="pipeline-step" id="status-multifactor"><i class="fas fa-project-diagram"></i> چندفاکتوری</span>
             </div>
 
@@ -252,7 +262,7 @@
                 </li>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link disabled-tab" id="tab-censored-btn" data-bs-toggle="tab" data-bs-target="#tab-censored" type="button">
-                        <span class="step-badge">2</span> داده سانسور
+                        <span class="step-badge">2</span> داده سنسورد
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
@@ -261,18 +271,28 @@
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
-                    <button class="nav-link disabled-tab" id="tab-normalization-btn" data-bs-toggle="tab" data-bs-target="#tab-normalization" type="button">
-                        <span class="step-badge">4</span> توزیع نرمال
+                    <button class="nav-link disabled-tab" id="tab-anomaly-btn" data-bs-toggle="tab" data-bs-target="#tab-anomaly" type="button">
+                        <span class="step-badge">4</span> جداسازی آنومالی‌ها
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link disabled-tab" id="tab-statistics-btn" data-bs-toggle="tab" data-bs-target="#tab-statistics" type="button">
+                        <span class="step-badge">5</span> آمار توصیفی
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link disabled-tab" id="tab-plots-btn" data-bs-toggle="tab" data-bs-target="#tab-plots" type="button">
-                        <span class="step-badge">5</span> رسم نمودار
+                        <span class="step-badge">6</span> رسم نمودار
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link disabled-tab" id="tab-normalization-btn" data-bs-toggle="tab" data-bs-target="#tab-normalization" type="button">
+                        <span class="step-badge">7</span> توزیع نرمال
                     </button>
                 </li>
                 <li class="nav-item" role="presentation">
                     <button class="nav-link disabled-tab" id="tab-multifactor-btn" data-bs-toggle="tab" data-bs-target="#tab-multifactor" type="button">
-                        <span class="step-badge">6</span> تحلیل چندفاکتوری
+                        <span class="step-badge">8</span> تحلیل چندفاکتوری
                     </button>
                 </li>
             </ul>
@@ -298,14 +318,69 @@
                             </a>
                         </div>
                         <div id="uploadResult" class="session-info mt-3" style="display:none"></div>
+
+                        <!-- انتخاب ستون‌های مختصات X و Y -->
+                        <div id="coordinateSection" class="mt-4" style="display:none">
+                            <div class="tab-card" style="background: #f0f7ff; border: 2px solid #3498db;">
+                                <h5><i class="fas fa-crosshairs text-primary"></i> انتخاب ستون‌های مختصات</h5>
+                                <p class="text-muted small">
+                                    <i class="fas fa-info-circle"></i>
+                                    ستون‌های X و Y را مشخص کنید تا به‌عنوان عنصر تحلیل نشوند.
+                                    اگر هیچ ستونی انتخاب نشود، سیستم به‌صورت خودکار شناسایی می‌کند.
+                                </p>
+                                <div class="row g-3 align-items-end">
+                                    <div class="col-md-4">
+                                        <label for="sheetSelect"><strong>شیت Excel:</strong></label>
+                                        <select id="sheetSelect" class="form-control form-control-custom" onchange="onSheetChange()"></select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="xColumnSelect"><strong>ستون X (طول جغرافیایی / Easting):</strong></label>
+                                        <select id="xColumnSelect" class="form-control form-control-custom">
+                                            <option value="">-- خودکار --</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label for="yColumnSelect"><strong>ستون Y (عرض جغرافیایی / Northing):</strong></label>
+                                        <select id="yColumnSelect" class="form-control form-control-custom">
+                                            <option value="">-- خودکار --</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="row mt-3">
+                                    <div class="col-md-4">
+                                        <button class="btn btn-success-custom w-100" onclick="saveCoordinates()">
+                                            <i class="fas fa-save"></i> ذخیره انتخاب مختصات
+                                        </button>
+                                    </div>
+                                    <div class="col-md-8">
+                                        <div id="coordSaveResult" style="display:none"></div>
+                                    </div>
+                                </div>
+                                <div id="coordStatus" class="mt-3" style="display:none">
+                                    <div style="background: #e8f8f0; border: 2px solid #27ae60; border-radius: 10px; padding: 14px 18px;">
+                                        <h6 style="color: #27ae60; margin-bottom: 10px;">
+                                            <i class="fas fa-check-circle"></i> ستون‌های مختصات ذخیره شده:
+                                        </h6>
+                                        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                                            <span id="coordStatusX" class="badge" style="background: #3498db; font-size: 14px; padding: 8px 16px; border-radius: 8px;">
+                                                <i class="fas fa-arrows-alt-h"></i> X: -
+                                            </span>
+                                            <span id="coordStatusY" class="badge" style="background: #e74c3c; font-size: 14px; padding: 8px 16px; border-radius: 8px;">
+                                                <i class="fas fa-arrows-alt-v"></i> Y: -
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Tab 2: Censored Data -->
                 <div class="tab-pane fade" id="tab-censored" role="tabpanel">
                     <div class="tab-card">
-                        <h5><i class="fas fa-filter text-primary"></i> پردازش داده‌های سانسور شده</h5>
-                        <p class="text-muted">مقادیر سانسور شده مانند <code>&lt;0.5</code> یا <code>&gt;100</code> با ضرایب قابل تنظیم اصلاح می‌شوند.</p>
+                        <h5><i class="fas fa-filter text-primary"></i> پردازش داده‌های سنسورد</h5>
+                        <p class="text-muted">مقادیر سنسورد مانند <code>&lt;0.5</code> یا <code>&gt;100</code> با ضرایب قابل تنظیم اصلاح می‌شوند.</p>
                         <div class="row g-3 align-items-end">
                             <div class="col-md-4">
                                 <label>شیت Excel:</label>
@@ -355,7 +430,7 @@
                                 <select id="outliersSource" class="form-control form-control-custom">
                                     <option value="auto">خودکار (آخرین مرحله انجام‌شده)</option>
                                     <option value="original">فایل اصلی</option>
-                                    <option value="censored">خروجی سانسور</option>
+                                    <option value="censored">خروجی سنسورد</option>
                                 </select>
                             </div>
                         </div>
@@ -386,34 +461,104 @@
                     </div>
                 </div>
 
-                <!-- Tab 4: Normalization -->
-                <div class="tab-pane fade" id="tab-normalization" role="tabpanel">
+                <!-- Tab 4: Anomaly Separation -->
+                <div class="tab-pane fade" id="tab-anomaly" role="tabpanel">
                     <div class="tab-card">
-                        <h5><i class="fas fa-bell-curve text-success"></i> تبدیل به توزیع نرمال</h5>
-                        <p class="text-muted">روش‌های Box-Cox، Yeo-Johnson، Quantile، Rank-Based، Log و Sqrt روی ستون‌های عددی اعمال می‌شوند.</p>
+                        <h5><i class="fas fa-crosshairs text-danger"></i> جداسازی آنومالی‌ها</h5>
+                        <p class="text-muted">هر عنصر عددی طبقه‌بندی می‌شود و ستون <code>{عنصر}_class</code> اضافه می‌گردد: کلاس <strong>0</strong> = زمینه و کلاس‌های <strong>۱ تا n</strong> = آنومالی از خفیف تا شدید. تعداد کلاس‌ها را می‌توانید (حداکثر ۱۰) تعیین و حدود هر کلاس را ویرایش کنید.</p>
                         <div class="row g-3 mb-3">
                             <div class="col-md-4">
                                 <label>منبع داده ورودی:</label>
-                                <select id="normalizationSource" class="form-control form-control-custom">
+                                <select id="anomalySource" class="form-control form-control-custom">
                                     <option value="auto">خودکار (آخرین مرحله انجام‌شده)</option>
                                     <option value="original">فایل اصلی</option>
-                                    <option value="censored">خروجی سانسور</option>
+                                    <option value="censored">خروجی سنسورد</option>
                                     <option value="outliers">خروجی Outliers</option>
                                 </select>
                             </div>
+                            <div class="col-md-4">
+                                <label>تعداد کلاس‌ها (حداکثر ۱۰):</label>
+                                <select id="anomalyClassCount" class="form-control form-control-custom" onchange="renderAnomalyThresholdInputs()">
+                                    <option value="2">۲ کلاس (زمینه + آنومالی)</option>
+                                    <option value="3" selected>۳ کلاس (زمینه + خفیف + شدید)</option>
+                                    <option value="4">۴ کلاس</option>
+                                    <option value="5">۵ کلاس</option>
+                                    <option value="6">۶ کلاس</option>
+                                    <option value="7">۷ کلاس</option>
+                                    <option value="8">۸ کلاس</option>
+                                    <option value="9">۹ کلاس</option>
+                                    <option value="10">۱۰ کلاس</option>
+                                </select>
+                                <small class="text-muted d-block mt-1">کلاس ۰ همیشه زمینه است؛ بقیه کلاس‌ها از آنومالی خفیف تا شدید</small>
+                            </div>
                         </div>
-                        <button class="btn btn-custom" onclick="processNormalization()">
-                            <i class="fas fa-play"></i> اجرای تبدیل
+                        <p>روش جداسازی:</p>
+                        <div class="method-selector">
+                            <div class="method-option selected" data-anomaly-method="classical" onclick="selectAnomalyMethod('classical')">
+                                <i class="fas fa-chart-line"></i><h6 class="mb-0 mt-1">کلاسیک</h6>
+                                <small class="text-muted">Mean ± n×SD</small>
+                            </div>
+                            <div class="method-option" data-anomaly-method="boxplot" onclick="selectAnomalyMethod('boxplot')">
+                                <i class="fas fa-box"></i><h6 class="mb-0 mt-1">جعبه‌ای</h6>
+                                <small class="text-muted">Box Plot (IQR)</small>
+                            </div>
+                            <div class="method-option" data-anomaly-method="fractal" onclick="selectAnomalyMethod('fractal')">
+                                <i class="fas fa-wave-square"></i><h6 class="mb-0 mt-1">فرکتالی</h6>
+                                <small class="text-muted">Concentration-Number</small>
+                            </div>
+                        </div>
+                        <!-- Classical options -->
+                        <div id="classicalOptions" class="mb-3">
+                            <div class="row g-3" id="classicalInputs"></div>
+                            <small class="text-muted d-block mt-2"><i class="fas fa-info-circle"></i> مقادیر n برای هر کلاس: Mean ± n×SD — کلاس‌ها از خفیف (کوچک‌ترین n) تا شدید (بزرگ‌ترین n) مرتب می‌شوند.</small>
+                        </div>
+                        <!-- Boxplot options -->
+                        <div id="boxplotOptions" style="display:none" class="mb-3">
+                            <div class="row g-3" id="boxplotInputs"></div>
+                            <small class="text-muted d-block mt-2"><i class="fas fa-info-circle"></i> ضرایب k برای هر کلاس: خارج از [Q1-k×IQR, Q3+k×IQR] — کلاس‌ها از خفیف تا شدید مرتب می‌شوند.</small>
+                        </div>
+                        <!-- Fractal options -->
+                        <div id="fractalOptions" style="display:none" class="mb-3">
+                            <div class="row g-3" id="fractalInputs"></div>
+                            <small class="text-muted d-block mt-2"><i class="fas fa-info-circle"></i> درصدها بر اساس شکستگی در نمودار Log-Log غلظت-تعداد — درصد بیشتر = کلاس خفیف‌تر</small>
+                        </div>
+                        <button class="btn btn-custom" onclick="processAnomalySeparation()">
+                            <i class="fas fa-play"></i> اجرای جداسازی
                         </button>
-                        <div class="loading-spinner" id="normalizationLoading">
+                        <div class="loading-spinner" id="anomalyLoading">
                             <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
                             <p>در حال پردازش...</p>
                         </div>
-                        <div class="result-box" id="normalizationResult"></div>
+                        <div class="result-box" id="anomalyResult"></div>
                     </div>
                 </div>
 
-                <!-- Tab 5: Plots -->
+                <!-- Tab 5: Statistics -->
+                <div class="tab-pane fade" id="tab-statistics" role="tabpanel">
+                    <div class="tab-card">
+                        <h5><i class="fas fa-calculator text-success"></i> آمار توصیفی ستون‌ها</h5>
+                        <p class="text-muted">محاسبه آمار کامل برای هر ستون عددی شامل میانگین، میانه، مد، واریانس، انحراف معیار، چولگی، کشیدگی، صدک‌ها و آزمون نرمال بودن.</p>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-4">
+                                <label>منبع داده ورودی:</label>
+                                <select id="statisticsSource" class="form-control form-control-custom">
+                                    <option value="auto">خودکار (آخرین مرحله انجام‌شده)</option>
+                                    <option value="original">فایل اصلی</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button class="btn btn-custom" onclick="processStatistics()">
+                            <i class="fas fa-play"></i> محاسبه آمار توصیفی
+                        </button>
+                        <div class="loading-spinner" id="statisticsLoading">
+                            <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
+                            <p>در حال محاسبه...</p>
+                        </div>
+                        <div class="result-box" id="statisticsResult"></div>
+                    </div>
+                </div>
+
+                <!-- Tab 6: Plots -->
                 <div class="tab-pane fade" id="tab-plots" role="tabpanel">
                     <div class="tab-card">
                         <h5><i class="fas fa-map text-info"></i> رسم نمودارهای توزیع عناصر</h5>
@@ -423,8 +568,9 @@
                                 <select id="plotsSource" class="form-control form-control-custom">
                                     <option value="auto">خودکار</option>
                                     <option value="original">فایل اصلی</option>
-                                    <option value="censored">خروجی سانسور</option>
+                                    <option value="censored">خروجی سنسورد</option>
                                     <option value="outliers">خروجی Outliers</option>
+                                    <option value="anomaly">خروجی جداسازی آنومالی</option>
                                     <option value="normalization">خروجی نرمال‌سازی</option>
                                 </select>
                             </div>
@@ -458,15 +604,254 @@
                     </div>
                 </div>
 
-                <!-- Tab 6: Multifactor (Coming Soon) -->
+                <!-- Tab 6: Normalization (moved after Plots) -->
+                <div class="tab-pane fade" id="tab-normalization" role="tabpanel">
+                    <div class="tab-card">
+                        <h5><i class="fas fa-bell-curve text-success"></i> تبدیل به توزیع نرمال</h5>
+                        <p class="text-muted">روش‌های تبدیل به توزیع نرمال را انتخاب کنید و روی ستون‌های عددی اعمال نمایید.</p>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-4">
+                                <label>منبع داده ورودی:</label>
+                                <select id="normalizationSource" class="form-control form-control-custom">
+                                    <option value="auto">خودکار (آخرین مرحله انجام‌شده)</option>
+                                    <option value="original">فایل اصلی</option>
+                                    <option value="censored">خروجی سنسورد</option>
+                                    <option value="outliers">خروجی Outliers</option>
+                                    <option value="anomaly">خروجی جداسازی آنومالی</option>
+                                </select>
+                            </div>
+                            <div class="col-md-8">
+                                <label>روش‌های تبدیل:</label>
+                                <div class="d-flex flex-wrap gap-2 align-items-center mt-1">
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input norm-method" type="checkbox" id="normAll" value="all" checked onchange="toggleAllNormMethods()">
+                                        <label class="form-check-label fw-bold" for="normAll">همه</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input norm-method" type="checkbox" id="normBoxCox" value="Box-Cox" checked onchange="updateNormAllCheck()">
+                                        <label class="form-check-label" for="normBoxCox">Box-Cox</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input norm-method" type="checkbox" id="normYeoJohn" value="Yeo-Johnson" checked onchange="updateNormAllCheck()">
+                                        <label class="form-check-label" for="normYeoJohn">Yeo-Johnson</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input norm-method" type="checkbox" id="normQuantile" value="Quantile" checked onchange="updateNormAllCheck()">
+                                        <label class="form-check-label" for="normQuantile">Quantile</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input norm-method" type="checkbox" id="normRank" value="Rank-Based" checked onchange="updateNormAllCheck()">
+                                        <label class="form-check-label" for="normRank">Rank-Based</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input norm-method" type="checkbox" id="normLog" value="Log" checked onchange="updateNormAllCheck()">
+                                        <label class="form-check-label" for="normLog">Log</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input norm-method" type="checkbox" id="normSqrt" value="Sqrt" checked onchange="updateNormAllCheck()">
+                                        <label class="form-check-label" for="normSqrt">Sqrt</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-3 mt-2">
+                            <div class="col-md-6">
+                                <label>نوع خروجی:</label>
+                                <div class="d-flex gap-3 align-items-center mt-1">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="normOutputMode" id="normOutputBest" value="best" checked>
+                                        <label class="form-check-label" for="normOutputBest">فقط بهترین تبدیل هر ستون</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="normOutputMode" id="normOutputAll" value="all">
+                                        <label class="form-check-label" for="normOutputAll">همه تبدیل‌ها</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn btn-custom" onclick="processNormalization()">
+                            <i class="fas fa-play"></i> اجرای تبدیل
+                        </button>
+                        <div class="loading-spinner" id="normalizationLoading">
+                            <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
+                            <p>در حال پردازش...</p>
+                        </div>
+                        <div class="result-box" id="normalizationResult"></div>
+                    </div>
+                </div>
+
+                <!-- Tab 8: Multifactor Analysis -->
                 <div class="tab-pane fade" id="tab-multifactor" role="tabpanel">
                     <div class="tab-card">
-                        <div class="coming-soon-box">
-                            <i class="fas fa-tools d-block"></i>
-                            <h4>تحلیل چندفاکتوری (PCA / Factor Analysis)</h4>
-                            <p class="mb-0">این بخش در حال آماده‌سازی است و به‌زودی در دسترس قرار می‌گیرد.</p>
-                            <p class="text-muted mt-2"><small>شامل: تحلیل مؤلفه‌های اصلی، تحلیل فاکتوری، Scree Plot و Biplot</small></p>
+                        <h5><i class="fas fa-project-diagram text-success"></i> تحلیل چندمتغیره</h5>
+                        
+                        <!-- Sub-tabs -->
+                        <ul class="nav nav-pills mb-3" id="multifactorSubTabs" role="tablist">
+                            <li class="nav-item">
+                                <button class="nav-link active" data-subtab="correlation" onclick="switchMultifactorSubTab('correlation')">
+                                    <i class="fas fa-th"></i> ماتریس همبستگی
+                                </button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-subtab="pca" onclick="switchMultifactorSubTab('pca')">
+                                    <i class="fas fa-chart-area"></i> PCA
+                                </button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-subtab="hierarchical" onclick="switchMultifactorSubTab('hierarchical')">
+                                    <i class="fas fa-sitemap"></i> خوشه‌بندی سلسله‌مراتبی
+                                </button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-subtab="kmeans" onclick="switchMultifactorSubTab('kmeans')">
+                                    <i class="fas fa-object-group"></i> K-Means
+                                </button>
+                            </li>
+                        </ul>
+
+                        <!-- Source selector (shared) -->
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-4">
+                                <label>منبع داده ورودی:</label>
+                                <select id="multifactorSource" class="form-control form-control-custom">
+                                    <option value="auto">خودکار (آخرین مرحله انجام‌شده)</option>
+                                    <option value="original">فایل اصلی</option>
+                                    <option value="censored">خروجی سنسورد</option>
+                                    <option value="outliers">خروجی Outliers</option>
+                                    <option value="anomaly">خروجی جداسازی آنومالی</option>
+                                    <option value="normalization">خروجی نرمال‌سازی</option>
+                                </select>
+                            </div>
                         </div>
+
+                        <!-- Sub-tab: Correlation -->
+                        <div id="subtab-correlation" class="multifactor-subtab">
+                            <h6><i class="fas fa-th text-primary"></i> ماتریس همبستگی</h6>
+                            <p class="text-muted small">محاسبه همبستگی بین عناصر با روش‌های Pearson، Spearman و Kendall</p>
+                            <div class="row g-2 mb-3">
+                                <div class="col-md-3">
+                                    <label>روش همبستگی:</label>
+                                    <select id="corrMethod" class="form-control form-control-custom">
+                                        <option value="pearson">Pearson</option>
+                                        <option value="spearman">Spearman</option>
+                                        <option value="kendall">Kendall</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label>فیلتر p-value (اختیاری):</label>
+                                    <select id="corrPvalueFilter" class="form-control form-control-custom">
+                                        <option value="">همه (بدون فیلتر)</option>
+                                        <option value="0.05" selected>p < 0.05</option>
+                                        <option value="0.01">p < 0.01</option>
+                                        <option value="0.001">p < 0.001</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 d-flex align-items-end">
+                                    <button class="btn btn-custom" onclick="processCorrelation()">
+                                        <i class="fas fa-play"></i> اجرا
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="loading-spinner" id="correlationLoading">
+                                <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
+                                <p>در حال پردازش...</p>
+                            </div>
+                            <div class="result-box" id="correlationResult"></div>
+                        </div>
+
+                        <!-- Sub-tab: PCA -->
+                        <div id="subtab-pca" class="multifactor-subtab" style="display:none">
+                            <h6><i class="fas fa-chart-area text-primary"></i> تحلیل مؤلفه‌های اصلی (PCA)</h6>
+                            <p class="text-muted small">کاهش ابعاد و شناسایی مؤلفه‌های اصلی با Scree Plot و Biplot</p>
+                            <div class="row g-2 mb-3">
+                                <div class="col-md-3">
+                                    <label>تعداد مؤلفه‌ها (خالی=خودکار):</label>
+                                    <input type="number" id="pcaNComponents" class="form-control form-control-custom" placeholder="خودکار" min="1">
+                                </div>
+                                <div class="col-md-3">
+                                    <label>استانداردسازی:</label>
+                                    <select id="pcaStandardize" class="form-control form-control-custom">
+                                        <option value="true">بله (توصیه شده)</option>
+                                        <option value="false">خیر</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 d-flex align-items-end">
+                                    <button class="btn btn-custom" onclick="processPCA()">
+                                        <i class="fas fa-play"></i> اجرا
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="loading-spinner" id="pcaLoading">
+                                <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
+                                <p>در حال پردازش...</p>
+                            </div>
+                            <div class="result-box" id="pcaResult"></div>
+                        </div>
+
+                        <!-- Sub-tab: Hierarchical Clustering -->
+                        <div id="subtab-hierarchical" class="multifactor-subtab" style="display:none">
+                            <h6><i class="fas fa-sitemap text-primary"></i> خوشه‌بندی سلسله‌مراتبی</h6>
+                            <p class="text-muted small">خوشه‌بندی نمونه‌ها با روش Ward، Complete، Average و Single</p>
+                            <div class="row g-2 mb-3">
+                                <div class="col-md-2">
+                                    <label>تعداد خوشه‌ها:</label>
+                                    <input type="number" id="hierNClusters" class="form-control form-control-custom" value="3" min="2">
+                                </div>
+                                <div class="col-md-3">
+                                    <label>روش linkage:</label>
+                                    <select id="hierLinkage" class="form-control form-control-custom">
+                                        <option value="ward">Ward</option>
+                                        <option value="complete">Complete</option>
+                                        <option value="average">Average</option>
+                                        <option value="single">Single</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label>معیار فاصله:</label>
+                                    <select id="hierDistance" class="form-control form-control-custom">
+                                        <option value="euclidean">Euclidean</option>
+                                        <option value="manhattan">Manhattan</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2 d-flex align-items-end">
+                                    <button class="btn btn-custom" onclick="processHierarchical()">
+                                        <i class="fas fa-play"></i> اجرا
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="loading-spinner" id="hierarchicalLoading">
+                                <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
+                                <p>در حال پردازش...</p>
+                            </div>
+                            <div class="result-box" id="hierarchicalResult"></div>
+                        </div>
+
+                        <!-- Sub-tab: K-Means -->
+                        <div id="subtab-kmeans" class="multifactor-subtab" style="display:none">
+                            <h6><i class="fas fa-object-group text-primary"></i> خوشه‌بندی K-Means</h6>
+                            <p class="text-muted small">خوشه‌بندی K-Means با Elbow Plot و Silhouette Analysis</p>
+                            <div class="row g-2 mb-3">
+                                <div class="col-md-2">
+                                    <label>تعداد خوشه‌ها (K):</label>
+                                    <input type="number" id="kmeansK" class="form-control form-control-custom" value="3" min="2">
+                                </div>
+                                <div class="col-md-2">
+                                    <label>حداکثر تکرار:</label>
+                                    <input type="number" id="kmeansMaxIter" class="form-control form-control-custom" value="300" min="10">
+                                </div>
+                                <div class="col-md-2 d-flex align-items-end">
+                                    <button class="btn btn-custom" onclick="processKMeans()">
+                                        <i class="fas fa-play"></i> اجرا
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="loading-spinner" id="kmeansLoading">
+                                <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
+                                <p>در حال پردازش...</p>
+                            </div>
+                            <div class="result-box" id="kmeansResult"></div>
+                        </div>
+
                     </div>
                 </div>
 
@@ -489,7 +874,7 @@
     let selectedOutlierMethod = 'iqr';
     let pipelineState = { steps: {} };
 
-    const TAB_IDS = ['upload', 'censored', 'outliers', 'normalization', 'plots', 'multifactor'];
+    const TAB_IDS = ['upload', 'censored', 'outliers', 'anomaly', 'statistics', 'plots', 'normalization', 'multifactor'];
 
     // --- Upload ---
     const fileUploadArea = document.getElementById('fileUploadArea');
@@ -515,7 +900,10 @@
         document.getElementById('uploadProgress').style.display = 'block';
 
         fetch('/upload', { method: 'POST', body: formData })
-            .then(r => r.json())
+            .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
             .then(data => {
                 document.getElementById('uploadProgress').style.display = 'none';
                 if (data.success) {
@@ -525,13 +913,16 @@
                     document.getElementById('uploadResult').style.display = 'block';
                     document.getElementById('uploadResult').innerHTML =
                         `<strong>فایل:</strong> ${data.filename} &nbsp;|&nbsp; <strong>جلسه:</strong> ${sessionId} &nbsp;|&nbsp; <strong>شیت‌ها:</strong> ${data.sheet_names.join(', ')}`;
-                    enableTabs(['censored', 'outliers', 'normalization', 'plots', 'multifactor']);
-                    document.getElementById('globalDownload').style.display = 'block';
-                    document.getElementById('downloadAllBtn').href = `/download_all/${sessionId}`;
+                    // نمایش بخش انتخاب مختصات و پر کردن لیست ستون‌ها
+                    document.getElementById('coordinateSection').style.display = 'block';
+                    populateSheetSelectForCoordinates(data.sheet_names, data.default_sheet);
+                    if (data.columns) {
+                        populateCoordinateSelects(data.columns);
+                    }
+                    enableTabs(['censored', 'outliers', 'anomaly', 'statistics', 'plots', 'normalization', 'multifactor']);
                     updatePipelineStatus({ steps: {} });
                     showAlert(data.message, 'success');
-                    // Auto-switch to censored tab
-                    new bootstrap.Tab(document.getElementById('tab-censored-btn')).show();
+                    // ماندن در صفحه آپلود برای انتخاب مختصات X و Y
                 } else {
                     showAlert(data.error, 'danger');
                 }
@@ -553,6 +944,101 @@
         });
     }
 
+    // --- Coordinate column selection ---
+    function populateCoordinateSelects(columns, defaultX, defaultY) {
+        const xSel = document.getElementById('xColumnSelect');
+        const ySel = document.getElementById('yColumnSelect');
+        // حفظ مقادیر فعلی
+        const currentX = xSel.value;
+        const currentY = ySel.value;
+        xSel.innerHTML = '<option value="">-- خودکار --</option>';
+        ySel.innerHTML = '<option value="">-- خودکار --</option>';
+        columns.forEach(col => {
+            const optX = document.createElement('option');
+            optX.value = col; optX.textContent = col;
+            xSel.appendChild(optX);
+            const optY = document.createElement('option');
+            optY.value = col; optY.textContent = col;
+            ySel.appendChild(optY);
+        });
+        // بازگرداندن مقادیر قبلی یا مقادیر پیش‌فرض
+        if (currentX && columns.includes(currentX)) xSel.value = currentX;
+        else if (defaultX && columns.includes(defaultX)) xSel.value = defaultX;
+        if (currentY && columns.includes(currentY)) ySel.value = currentY;
+        else if (defaultY && columns.includes(defaultY)) ySel.value = defaultY;
+    }
+
+    function populateSheetSelectForCoordinates(names, defaultSheet) {
+        const sel = document.getElementById('sheetSelect');
+        sel.innerHTML = '';
+        names.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s; opt.textContent = s;
+            if (s === defaultSheet) opt.selected = true;
+            sel.appendChild(opt);
+        });
+    }
+
+    function onSheetChange() {
+        const sheetName = document.getElementById('sheetSelect').value;
+        if (!sessionId || !sheetName) return;
+        fetch('/get_columns', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId, sheet_name: sheetName })
+        })
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
+        .then(data => {
+            if (data.success && data.columns) {
+                populateCoordinateSelects(data.columns);
+            }
+        })
+        .catch(() => showAlert('خطا در خواندن ستون‌ها', 'danger'));
+    }
+
+    function saveCoordinates() {
+        if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
+        const xCol = document.getElementById('xColumnSelect').value;
+        const yCol = document.getElementById('yColumnSelect').value;
+        const resultDiv = document.getElementById('coordSaveResult');
+
+        fetch('/save_coordinates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                x_col: xCol || null,
+                y_col: yCol || null
+            })
+        })
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
+        .then(data => {
+            if (data.success) {
+                // نمایش وضعیت ذخیره‌شده
+                const statusDiv = document.getElementById('coordStatus');
+                const statusX = document.getElementById('coordStatusX');
+                const statusY = document.getElementById('coordStatusY');
+                statusDiv.style.display = 'block';
+                statusX.innerHTML = `<i class="fas fa-arrows-alt-h"></i> X: ${data.user_x_col || 'خودکار'}`;
+                statusY.innerHTML = `<i class="fas fa-arrows-alt-v"></i> Y: ${data.user_y_col || 'خودکار'}`;
+                showAlert(data.message, 'success');
+                // انتقال خودکار به صفحه پردازش سنسورد
+                setTimeout(() => {
+                    new bootstrap.Tab(document.getElementById('tab-censored-btn')).show();
+                }, 800);
+            } else {
+                showAlert(data.error, 'danger');
+            }
+        })
+        .catch(() => showAlert('خطا در ذخیره مختصات', 'danger'));
+    }
+
     function enableTabs(tabs) {
         tabs.forEach(t => {
             document.getElementById(`tab-${t}-btn`).classList.remove('disabled-tab');
@@ -562,8 +1048,7 @@
     function updatePipelineStatus(state) {
         pipelineState = state;
         const steps = state.steps || {};
-        document.getElementById('status-upload').classList.toggle('done', !!sessionId);
-        ['censored', 'outliers', 'normalization', 'plots'].forEach(s => {
+        document.getElementById('status-upload').classList.toggle('done', !!sessionId);                ['censored', 'outliers', 'anomaly', 'statistics', 'plots', 'normalization'].forEach(s => {
             document.getElementById(`status-${s}`).classList.toggle('done', !!steps[s]);
         });
     }
@@ -571,8 +1056,34 @@
     function refreshSessionStatus() {
         if (!sessionId) return;
         fetch(`/session/${sessionId}/status`)
-            .then(r => r.json())
-            .then(data => { if (data.success) updatePipelineStatus(data.state); });
+            .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
+            .then(data => {
+                if (data.success) {
+                    updatePipelineStatus(data.state);
+                    // بازیابی وضعیت مختصات ذخیره‌شده
+                    const state = data.state;
+                    const ux = state.user_x_col;
+                    const uy = state.user_y_col;
+                    if (ux || uy) {
+                        const statusDiv = document.getElementById('coordStatus');
+                        const statusX = document.getElementById('coordStatusX');
+                        const statusY = document.getElementById('coordStatusY');
+                        statusDiv.style.display = 'block';
+                        statusX.innerHTML = `<i class="fas fa-arrows-alt-h"></i> X: ${ux || 'خودکار'}`;
+                        statusY.innerHTML = `<i class="fas fa-arrows-alt-v"></i> Y: ${uy || 'خودکار'}`;
+                    }
+                    // نمایش دکمه دانلود وقتی مراحل انجام شده باشند
+                    const steps = state.steps || {};
+                    const hasSteps = Object.keys(steps).length > 0;
+                    if (hasSteps) {
+                        document.getElementById('globalDownload').style.display = 'block';
+                        document.getElementById('downloadAllBtn').href = `/download_all/${sessionId}`;
+                    }
+                }
+            });
     }
 
     // --- Outlier method ---
@@ -640,7 +1151,10 @@
                 right_coe: coeffs.right_coe,
             })
         })
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
         .then(data => {
             loading.style.display = 'none';
             if (data.success) {
@@ -649,8 +1163,7 @@
                 resultBox.innerHTML = buildCensoredResult(data);
                 refreshSessionStatus();
             } else showAlert(data.error, 'danger');
-        })
-        .catch(() => { loading.style.display = 'none'; showAlert('خطا در پردازش', 'danger'); });
+        })                .catch(e => { loading.style.display = 'none'; showAlert('خطا در پردازش: ' + (e.message || e), 'danger'); });
     }
 
     function processOutliers() {
@@ -670,7 +1183,10 @@
                 source: document.getElementById('outliersSource').value
             })
         })
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
         .then(data => {
             loading.style.display = 'none';
             if (data.success) {
@@ -679,12 +1195,36 @@
                 resultBox.innerHTML = buildOutliersResult(data);
                 refreshSessionStatus();
             } else showAlert(data.error, 'danger');
-        })
-        .catch(() => { loading.style.display = 'none'; showAlert('خطا در پردازش', 'danger'); });
+        })                .catch(e => { loading.style.display = 'none'; showAlert('خطا در پردازش: ' + (e.message || e), 'danger'); });
+    }
+
+    function toggleAllNormMethods() {
+        const allChecked = document.getElementById('normAll').checked;
+        document.querySelectorAll('.norm-method').forEach(cb => {
+            if (cb.id !== 'normAll') cb.checked = allChecked;
+        });
+    }
+
+    function updateNormAllCheck() {
+        const boxes = document.querySelectorAll('.norm-method');
+        const all = document.getElementById('normAll');
+        let allChecked = true;
+        boxes.forEach(cb => { if (cb.id !== 'normAll' && !cb.checked) allChecked = false; });
+        all.checked = allChecked;
+    }
+
+    function getSelectedNormMethods() {
+        const methods = [];
+        document.querySelectorAll('.norm-method').forEach(cb => {
+            if (cb.id !== 'normAll' && cb.checked) methods.push(cb.value);
+        });
+        return methods;
     }
 
     function processNormalization() {
         if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
+        const selectedMethods = getSelectedNormMethods();
+        if (selectedMethods.length === 0) { showAlert('حداقل یک روش تبدیل را انتخاب کنید', 'warning'); return; }
         const loading = document.getElementById('normalizationLoading');
         const resultBox = document.getElementById('normalizationResult');
         loading.style.display = 'block';
@@ -695,10 +1235,15 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 session_id: sessionId,
-                source: document.getElementById('normalizationSource').value
+                source: document.getElementById('normalizationSource').value,
+                methods: selectedMethods,
+                output_mode: document.querySelector('input[name="normOutputMode"]:checked').value
             })
         })
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
         .then(data => {
             loading.style.display = 'none';
             if (data.success) {
@@ -707,8 +1252,161 @@
                 resultBox.innerHTML = buildNormalizationResult(data);
                 refreshSessionStatus();
             } else showAlert(data.error, 'danger');
+        })                .catch(e => { loading.style.display = 'none'; showAlert('خطا در پردازش: ' + (e.message || e), 'danger'); });
+    }
+
+    let selectedAnomalyMethod = 'classical';
+
+    function getAnomalyClassCount() {
+        const sel = document.getElementById('anomalyClassCount');
+        let n = sel ? parseInt(sel.value) : 3;
+        if (isNaN(n)) n = 3;
+        return Math.max(2, Math.min(10, n));
+    }
+
+    function anomalyClassLabel(k, nAnom) {
+        if (nAnom <= 1) return 'آنومالی';
+        if (k === 1) return 'خفیف';
+        if (k === nAnom) return 'شدید';
+        return 'متوسط ' + k;
+    }
+
+    // رندر کادر ورودی آستانه/ضریب/درصد هر کلاس بر اساس تعداد کلاس‌ها و روش انتخابی
+    function renderAnomalyThresholdInputs() {
+        const nAnom = getAnomalyClassCount() - 1;
+        const cfgs = [
+            { id: 'classicalInputs', def: i => 2 + i, min: 0.5, max: 10, step: 0.1,
+              name: k => 'آستانه n کلاس ' + k, hint: 'Mean ± n×SD' },
+            { id: 'boxplotInputs', def: i => 1.5 + 1.5 * i, min: 0.1, max: 10, step: 0.1,
+              name: k => 'ضریب k کلاس ' + k, hint: 'خارج از [Q1-k×IQR, Q3+k×IQR]' },
+            { id: 'fractalInputs', def: i => Math.max(1, Math.round(15 - i * (10 / Math.max(nAnom - 1, 1)))),
+              min: 1, max: 50, step: 1,
+              name: k => 'درصد هدف کلاس ' + k + ' (%)', hint: 'درصد بیشتر = کلاس خفیف‌تر' }
+        ];
+        cfgs.forEach(cfg => {
+            const container = document.getElementById(cfg.id);
+            if (!container) return;
+            const existing = Array.from(container.querySelectorAll('input.anomaly-thr')).map(inp => inp.value);
+            let html = '';
+            for (let k = 1; k <= nAnom; k++) {
+                const val = (existing[k - 1] !== undefined && existing[k - 1] !== '') ? existing[k - 1] : cfg.def(k - 1);
+                html += `<div class="col-md-4">
+                    <label>${cfg.name(k)} (${anomalyClassLabel(k, nAnom)}):</label>
+                    <input type="number" class="form-control form-control-custom w-auto anomaly-thr" value="${val}" min="${cfg.min}" max="${cfg.max}" step="${cfg.step}">
+                    <small class="text-muted d-block mt-1">${cfg.hint}</small>
+                </div>`;
+            }
+            container.innerHTML = html;
+        });
+    }
+
+    // رندر اولیه کادرهای آستانه
+    renderAnomalyThresholdInputs();
+
+    function selectAnomalyMethod(method) {
+        selectedAnomalyMethod = method;
+        document.querySelectorAll('#tab-anomaly .method-option').forEach(o => o.classList.remove('selected'));
+        document.querySelector(`#tab-anomaly [data-anomaly-method="${method}"]`).classList.add('selected');
+        document.getElementById('classicalOptions').style.display = method === 'classical' ? 'block' : 'none';
+        document.getElementById('boxplotOptions').style.display = method === 'boxplot' ? 'block' : 'none';
+        document.getElementById('fractalOptions').style.display = method === 'fractal' ? 'block' : 'none';
+    }
+
+    function processAnomalySeparation() {
+        if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
+        const loading = document.getElementById('anomalyLoading');
+        const resultBox = document.getElementById('anomalyResult');
+        loading.style.display = 'block';
+        resultBox.style.display = 'none';
+
+        let params = {
+            session_id: sessionId,
+            method: selectedAnomalyMethod,
+            source: document.getElementById('anomalySource').value
+        };
+
+        params.num_classes = getAnomalyClassCount();
+        const inputsMap = { classical: 'classicalInputs', boxplot: 'boxplotInputs', fractal: 'fractalInputs' };
+        const thrInputs = Array.from(document.querySelectorAll('#' + inputsMap[selectedAnomalyMethod] + ' input.anomaly-thr'));
+        params.thresholds = thrInputs.map(i => parseFloat(i.value)).filter(v => !isNaN(v));
+        if (params.thresholds.length < params.num_classes - 1) {
+            loading.style.display = 'none';
+            showAlert('لطفاً مقادیر آستانه همه کلاس‌ها را وارد کنید', 'warning');
+            return;
+        }
+
+        fetch('/process_anomaly_separation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params)
         })
-        .catch(() => { loading.style.display = 'none'; showAlert('خطا در پردازش', 'danger'); });
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
+        .then(data => {
+            loading.style.display = 'none';
+            if (data.success) {
+                showAlert(data.message, 'success');
+                resultBox.style.display = 'block';
+                resultBox.innerHTML = buildAnomalyResult(data);
+                refreshSessionStatus();
+            } else showAlert(data.error, 'danger');
+        })                .catch(e => { loading.style.display = 'none'; showAlert('خطا در پردازش: ' + (e.message || e), 'danger'); });
+    }
+
+    function processStatistics() {
+        if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
+        const loading = document.getElementById('statisticsLoading');
+        const resultBox = document.getElementById('statisticsResult');
+        loading.style.display = 'block';
+        resultBox.style.display = 'none';
+
+        fetch('/process_statistics', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                source: document.getElementById('statisticsSource').value
+            })
+        })
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
+        .then(data => {
+            loading.style.display = 'none';
+            if (data.success) {
+                showAlert(data.message, 'success');
+                resultBox.style.display = 'block';
+                resultBox.innerHTML = buildStatisticsResult(data);
+                refreshSessionStatus();
+            } else showAlert(data.error, 'danger');
+        })                .catch(e => { loading.style.display = 'none'; showAlert('خطا در پردازش: ' + (e.message || e), 'danger'); });
+    }
+
+    function buildStatisticsResult(data) {
+        const dlLink = (f, label) => f ? `<a href="/download/${sessionId}/${f}" class="btn btn-sm btn-outline-success me-2"><i class="fas fa-download"></i> ${label}</a>` : '';
+        let html = `<h6><i class="fas fa-check-circle text-success"></i> آمار توصیفی محاسبه شد</h6>`;
+        html += `<p class="text-muted small">منبع: ${data.input_source} | تعداد عناصر: ${data.analyzed_columns}</p>`;
+        if (data.stats && data.stats.length) {
+            html += '<div style="overflow-x:auto;"><table class="table table-sm table-striped mt-2" style="font-size:0.82rem"><thead><tr>';
+            const keys = Object.keys(data.stats[0]);
+            keys.forEach(k => { html += `<th>${k}</th>`; });
+            html += '</tr></thead><tbody>';
+            data.stats.forEach(row => {
+                html += '<tr>';
+                keys.forEach(k => {
+                    let v = row[k];
+                    if (typeof v === 'number') v = isNaN(v) ? '-' : (Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(2) : +v.toFixed(4));
+                    html += `<td>${v != null ? v : '-'}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+        html += dlLink(data.output_file, 'دانلود فایل آمار توصیفی');
+        return html;
     }
 
     function processPlots() {
@@ -728,7 +1426,10 @@
                 cmap: document.getElementById('plotsCmap').value
             })
         })
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
         .then(data => {
             loading.style.display = 'none';
             if (data.success) {
@@ -783,12 +1484,19 @@
             }
             bestHtml += '</ul>';
         }
+        let methodsHtml = '';
+        if (data.selected_methods) {
+            methodsHtml = `<p class="text-muted small">روش‌های اعمال‌شده: <strong>${data.selected_methods.join('، ')}</strong></p>`;
+        }
+        const modeLabel = data.output_mode === 'all' ? 'همه تبدیل‌ها (هر ستون × هر روش)' : 'فقط بهترین تبدیل هر ستون (نام عنصر_روش)';
         return `
             <h6><i class="fas fa-check-circle text-success"></i> تبدیل انجام شد</h6>
             <p class="text-muted small">منبع ورودی: ${data.input_source} — ${data.analyzed_columns} ستون تحلیل شد</p>
+            ${methodsHtml}
+            <p class="text-muted small"><strong>نوع خروجی:</strong> ${modeLabel}</p>
             <p><strong>بهترین روش برای هر ستون:</strong></p>${bestHtml}
-            ${dlLink(data.output_file, 'دانلود داده تبدیل‌شده')}
-            ${dlLink(data.report_file, 'دانلود گزارش تبدیل')}
+            <p class="text-muted small mt-2"><i class="fas fa-info-circle"></i> فایل خروجی شامل سه شیت است: داده‌های تبدیل‌شده، گزارش تفصیلی و خلاصه بهترین روش</p>
+            ${dlLink(data.output_file, 'دانلود فایل خروجی (داده + گزارش)')}
         `;
     }
 
@@ -808,12 +1516,296 @@
         `;
     }
 
+    function buildAnomalyResult(data) {
+        const nAnom = Math.max(1, (data.num_classes || 3) - 1);
+        const labels = [];
+        for (let k = 1; k <= nAnom; k++) labels.push(anomalyClassLabel(k, nAnom));
+
+        let statsHtml = '<div class="stats-grid">';
+        (data.class_totals || []).forEach((c, i) => {
+            statsHtml += `<div class="stat-item"><div class="stat-value">${c}</div><div class="stat-label">کلاس ${i + 1} (${labels[i] || ''})</div></div>`;
+        });
+        statsHtml += `<div class="stat-item"><div class="stat-value">${data.total_anomalies}</div><div class="stat-label">کل آنومالی</div></div>`;
+        statsHtml += `<div class="stat-item"><div class="stat-value">${data.anomaly_percent}%</div><div class="stat-label">درصد کل</div></div>`;
+        statsHtml += `<div class="stat-item"><div class="stat-value">${data.analyzed_columns}</div><div class="stat-label">ستون تحلیل‌شده</div></div>`;
+        statsHtml += '</div>';
+
+        let detailsHtml = '';
+        if (data.anomaly_details && data.anomaly_details.length) {
+            let headCells = '';
+            for (let k = 1; k <= nAnom; k++) headCells += `<th>کلاس ${k}</th>`;
+            let thrCells = '';
+            for (let k = 1; k <= nAnom; k++) thrCells += `<th>آستانه ${k}</th>`;
+            detailsHtml = `<table class="table table-sm mt-3"><thead><tr><th>ستون</th>${headCells}<th>کل</th><th>درصد</th>${thrCells}</tr></thead><tbody>`;
+            data.anomaly_details.forEach(d => {
+                let countCells = '';
+                for (let k = 0; k < nAnom; k++) countCells += `<td>${(d.class_counts && d.class_counts[k]) || 0}</td>`;
+                let thrValues = '';
+                for (let k = 0; k < nAnom; k++) {
+                    const t = d.thresholds ? d.thresholds[k] : null;
+                    thrValues += `<td>${t != null ? Number(t).toFixed(4) : '-'}</td>`;
+                }
+                detailsHtml += `<tr><td>${d.column}</td>${countCells}<td>${d.count}</td><td>${d.percent}%</td>${thrValues}</tr>`;
+            });
+            detailsHtml += '</tbody></table>';
+        }
+
+        return `
+            <h6><i class="fas fa-check-circle text-success"></i> جداسازی آنومالی انجام شد — روش: ${data.method_name} | تعداد کلاس‌ها: ${data.num_classes}</h6>
+            <p class="text-muted small">منبع ورودی: ${data.input_source}</p>
+            ${statsHtml}
+            ${detailsHtml}
+            ${dlLink(data.output_file, 'دانلود فایل طبقه‌بندی آنومالی')}
+        `;
+    }
+
     function showAlert(message, type) {
         const alertDiv = document.createElement('div');
         alertDiv.className = `alert alert-${type} alert-custom alert-dismissible fade show`;
         alertDiv.innerHTML = `${message}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
         document.querySelector('.content-section').prepend(alertDiv);
         setTimeout(() => { if (alertDiv.parentNode) alertDiv.remove(); }, 5000);
+    }
+
+    // ==================================================
+    // Multifactor Sub-tab Switching
+    // ==================================================
+    function switchMultifactorSubTab(tabName) {
+        document.querySelectorAll('.multifactor-subtab').forEach(el => el.style.display = 'none');
+        document.getElementById('subtab-' + tabName).style.display = 'block';
+        document.querySelectorAll('#multifactorSubTabs .nav-link').forEach(btn => btn.classList.remove('active'));
+        document.querySelector(`#multifactorSubTabs [data-subtab="${tabName}"]`).classList.add('active');
+    }
+
+    function plotsHtml(plots, dir) {
+        if (!plots || !plots.length) return '';
+        let h = '<div class="mt-2">';
+        plots.forEach(f => { h += dlLink(`${dir}/${f}`, f); });
+        h += '</div>';
+        return h;
+    }
+
+    // --- Correlation Matrix ---
+    function processCorrelation() {
+        if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
+        const loading = document.getElementById('correlationLoading');
+        const resultBox = document.getElementById('correlationResult');
+        loading.style.display = 'block';
+        resultBox.style.display = 'none';
+        const pvFilter = document.getElementById('corrPvalueFilter').value;
+        fetch('/process_correlation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                method: document.getElementById('corrMethod').value,
+                source: document.getElementById('multifactorSource').value,
+                pvalue_filter: pvFilter ? parseFloat(pvFilter) : null
+            })
+        })
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
+        .then(data => {
+            loading.style.display = 'none';
+            if (data.success) {
+                resultBox.style.display = 'block';
+                resultBox.innerHTML = buildCorrelationResult(data);
+                refreshSessionStatus();
+            } else showAlert(data.error, 'danger');
+        })
+        .catch(e => { loading.style.display = 'none'; showAlert('خطا در پردازش: ' + (e.message || e), 'danger'); });
+    }
+
+    function buildCorrelationResult(data) {
+        let pairsHtml = '';
+        if (data.significant_pairs && data.significant_pairs.length) {
+            pairsHtml = '<table class="table table-sm mt-2"><thead><tr><th>ستون ۱</th><th>ستون ۲</th><th>همبستگی</th><th>p-value</th><th>معنادار</th></tr></thead><tbody>';
+            data.significant_pairs.forEach(p => {
+                const cls = p.معنادار === 'بله' ? 'text-success fw-bold' : 'text-muted';
+                pairsHtml += `<tr><td>${p['ستون ۱']}</td><td>${p['ستون ۲']}</td><td>${p.همبستگی}</td><td>${p['p-value']}</td><td class="${cls}">${p.معنادار}</td></tr>`;
+            });
+            pairsHtml += '</tbody></table>';
+        }
+        return `
+            <h6><i class="fas fa-check-circle text-success"></i> ماتریس همبستگی (${data.method.toUpperCase()})</h6>
+            <p class="text-muted small">منبع: ${data.input_source} — ${data.analyzed_columns} ستون — ${data.n_samples} نمونه</p>
+            ${data.heatmap ? dlLink(`07_multifactor_plots/${data.heatmap}`, 'دانلود Heatmap') : ''}
+            ${dlLink(data.output_file, 'دانلود فایل اکسل')}
+            <details class="mt-2"><summary class="fw-bold" style="cursor:pointer">جفت‌های همبستگی (${data.significant_pairs ? data.significant_pairs.length : 0} مورد)</summary>${pairsHtml}</details>
+        `;
+    }
+
+    // --- PCA ---
+    function processPCA() {
+        if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
+        const loading = document.getElementById('pcaLoading');
+        const resultBox = document.getElementById('pcaResult');
+        loading.style.display = 'block';
+        resultBox.style.display = 'none';
+        const nComp = document.getElementById('pcaNComponents').value;
+        fetch('/process_pca', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                source: document.getElementById('multifactorSource').value,
+                n_components: nComp ? parseInt(nComp) : null,
+                standardize: document.getElementById('pcaStandardize').value === 'true'
+            })
+        })
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
+        .then(data => {
+            loading.style.display = 'none';
+            if (data.success) {
+                resultBox.style.display = 'block';
+                resultBox.innerHTML = buildPCAResult(data);
+                refreshSessionStatus();
+            } else showAlert(data.error, 'danger');
+        })                .catch(e => { loading.style.display = 'none'; showAlert('خطا در پردازش: ' + (e.message || e), 'danger'); });
+    }
+
+    function buildPCAResult(data) {
+        let eigenHtml = '<table class="table table-sm"><thead><tr><th>مؤلفه</th><th>مقدار ویژه</th><th>واریانس %</th><th>تجمعی %</th></tr></thead><tbody>';
+        if (data.eigenvalues) {
+            data.eigenvalues.forEach(e => {
+                const cls = e['مقدار ویژه'] >= 1 ? 'fw-bold text-success' : '';
+                eigenHtml += `<tr class="${cls}"><td>${e.مؤلفه}</td><td>${e['مقدار ویژه']}</td><td>${e['درصد واریانس']}</td><td>${e['واریانس تجمعی (%)']}</td></tr>`;
+            });
+        }
+        eigenHtml += '</tbody></table>';
+        let loadingsHtml = '<table class="table table-sm mt-2"><thead><tr><th>ستون</th>';
+        if (data.loadings) {
+            const cols = Object.keys(data.loadings);
+            if (cols.length > 0) {
+                const pcNames = Object.keys(data.loadings[cols[0]]);
+                pcNames.forEach(pc => { loadingsHtml += `<th>${pc}</th>`; });
+                loadingsHtml += '</tr><tbody>';
+                cols.forEach(col => {
+                    loadingsHtml += `<td>${col}</td>`;
+                    pcNames.forEach(pc => { loadingsHtml += `<td>${data.loadings[col][pc]}</td>`; });
+                    loadingsHtml += '</tr>';
+                });
+            }
+        }
+        loadingsHtml += '</tbody></table>';
+        return `
+            <h6><i class="fas fa-check-circle text-success"></i> PCA — ${data.n_components} مؤلفه انتخاب شد</h6>
+            <p class="text-muted small">منبع: ${data.input_source} — ${data.n_samples} نمونه</p>
+            <h6 class="mt-3">Eigenvalues:</h6>${eigenHtml}
+            <h6 class="mt-3">Loadings:</h6>${loadingsHtml}
+            ${plotsHtml(data.generated_plots, '07_multifactor_plots')}
+            ${dlLink(data.output_file, 'دانلود فایل اکسل')}
+        `;
+    }
+
+    // --- Hierarchical Clustering ---
+    function processHierarchical() {
+        if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
+        const loading = document.getElementById('hierarchicalLoading');
+        const resultBox = document.getElementById('hierarchicalResult');
+        loading.style.display = 'block';
+        resultBox.style.display = 'none';
+        fetch('/process_hierarchical_clustering', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                source: document.getElementById('multifactorSource').value,
+                n_clusters: parseInt(document.getElementById('hierNClusters').value),
+                linkage_method: document.getElementById('hierLinkage').value,
+                distance_metric: document.getElementById('hierDistance').value
+            })
+        })
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
+        .then(data => {
+            loading.style.display = 'none';
+            if (data.success) {
+                resultBox.style.display = 'block';
+                resultBox.innerHTML = buildHierarchicalResult(data);
+                refreshSessionStatus();
+            } else showAlert(data.error, 'danger');
+        })                .catch(e => { loading.style.display = 'none'; showAlert('خطا در پردازش: ' + (e.message || e), 'danger'); });
+    }
+
+    function buildHierarchicalResult(data) {
+        let statsHtml = '';
+        if (data.cluster_stats && data.cluster_stats.length) {
+            statsHtml = '<table class="table table-sm mt-2"><thead><tr><th>خوشه</th><th>تعداد</th><th>درصد</th></tr></thead><tbody>';
+            data.cluster_stats.forEach(s => { statsHtml += `<tr><td>${s.خوشه}</td><td>${s['تعداد نمونه']}</td><td>${s.درصد}%</td></tr>`; });
+            statsHtml += '</tbody></table>';
+        }
+        const silText = data.silhouette_score != null ? `Silhouette: ${data.silhouette_score}` : 'N/A';
+        return `
+            <h6><i class="fas fa-check-circle text-success"></i> خوشه‌بندی سلسله‌مراتبی (${data.linkage_method})</h6>
+            <p class="text-muted small">منبع: ${data.input_source} — ${data.n_samples} نمونه — ${data.n_clusters} خوشه — ${silText}</p>
+            ${statsHtml}
+            ${plotsHtml(data.generated_plots, '07_multifactor_plots')}
+            ${dlLink(data.output_file, 'دانلود فایل اکسل')}
+        `;
+    }
+
+    // --- K-Means ---
+    function processKMeans() {
+        if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
+        const loading = document.getElementById('kmeansLoading');
+        const resultBox = document.getElementById('kmeansResult');
+        loading.style.display = 'block';
+        resultBox.style.display = 'none';
+        fetch('/process_kmeans', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                source: document.getElementById('multifactorSource').value,
+                n_clusters: parseInt(document.getElementById('kmeansK').value),
+                max_iter: parseInt(document.getElementById('kmeansMaxIter').value)
+            })
+        })
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
+        .then(data => {
+            loading.style.display = 'none';
+            if (data.success) {
+                resultBox.style.display = 'block';
+                resultBox.innerHTML = buildKMeansResult(data);
+                refreshSessionStatus();
+            } else showAlert(data.error, 'danger');
+        })                .catch(e => { loading.style.display = 'none'; showAlert('خطا در پردازش: ' + (e.message || e), 'danger'); });
+    }
+
+    function buildKMeansResult(data) {
+        let statsHtml = '';
+        if (data.cluster_stats && data.cluster_stats.length) {
+            const cols = Object.keys(data.cluster_stats[0]).filter(k => !['خوشه', 'تعداد نمونه', 'درصد'].includes(k));
+            let headerHtml = '<tr><th>خوشه</th><th>تعداد</th><th>درصد</th>';
+            cols.forEach(c => { headerHtml += `<th>${c}</th>`; });
+            headerHtml += '</tr>';
+            statsHtml = `<table class="table table-sm mt-2"><thead>${headerHtml}</thead><tbody>`;
+            data.cluster_stats.forEach(s => {
+                let row = `<td>${s.خوشه}</td><td>${s['تعداد نمونه']}</td><td>${s.درصد}%</td>`;
+                cols.forEach(c => { row += `<td>${s[c] != null ? s[c] : '-'}</td>`; });
+                statsHtml += `<tr>${row}</tr>`;
+            });
+            statsHtml += '</tbody></table>';
+        }
+        const silText = data.silhouette_score != null ? `Silhouette: ${data.silhouette_score}` : 'N/A';
+        return `
+            <h6><i class="fas fa-check-circle text-success"></i> K-Means (K=${data.n_clusters})</h6>
+            <p class="text-muted small">منبع: ${data.input_source} — ${data.n_samples} نمونه — Inertia: ${data.inertia} — ${silText}</p>
+            ${statsHtml}
+            ${plotsHtml(data.generated_plots, '07_multifactor_plots')}
+            ${dlLink(data.output_file, 'دانلود فایل اکسل')}
+        `;
     }
 
     selectOutlierMethod('iqr');

@@ -259,7 +259,7 @@ def create_summary_plots(error_df, output_dir):
             row['Q3_RPD']
         ])
     
-    plt.boxplot(box_data, tick_labels=error_df_sorted['Element'])
+    plt.boxplot(box_data, labels=error_df_sorted['Element'])
     plt.axhline(y=20, color='r', linestyle='--', label='20% Threshold')
     plt.axhline(y=10, color='orange', linestyle='--', label='10% Threshold')
     plt.xticks(rotation=90)

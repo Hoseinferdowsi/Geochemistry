@@ -10,12 +10,15 @@ warnings.filterwarnings('ignore')
 # ==================================================
 # 1. پیدا کردن و خواندن فایل اکسل
 # ==================================================
+import argparse
 
-# روش اول: مشخص کردن مستقیم مسیر (این را ویرایش کنید)
-data_dir = Path('D:/03_AI/AI_Programming/Geochemistry_v3.0/Data')
-file_name = 'censored_processed_dorfel.xlsx'  # نام فایل خود را اینجا بنویسید
+parser = argparse.ArgumentParser(description='Convert to Standard Scale')
+parser.add_argument('--input', type=str, required=True, help='Path to input Excel file')
+parser.add_argument('--output-dir', type=str, default=None, help='Output directory (default: input file parent / normalized_results)')
+args = parser.parse_args()
 
-file_path = data_dir / file_name
+file_path = Path(args.input)
+data_dir = file_path.parent if args.output_dir is None else Path(args.output_dir)
 
 # اگر فایل مستقیم پیدا نشد، به دنبال فایل‌های اکسل در دایرکتوری بگرد
 if not file_path.exists():
