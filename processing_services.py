@@ -3,6 +3,7 @@
 import json
 import os
 import re
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib
@@ -12,7 +13,10 @@ import numpy as np
 import pandas as pd
 import scipy.stats as stats
 import seaborn as sns
+
+import config
 from scipy.interpolate import griddata
+from scipy.spatial import cKDTree
 from scipy.cluster.hierarchy import linkage, dendrogram, fcluster
 from sklearn.preprocessing import PowerTransformer, QuantileTransformer, StandardScaler
 from sklearn.decomposition import PCA, FactorAnalysis
@@ -58,7 +62,7 @@ ILLEGAL_EXCEL_CHARS = re.compile(r'[\000-\010]|[\013-\014]|[\016-\037]')
 
 
 def get_session_dir(session_id):
-    return os.path.join('sessions', session_id)
+    return os.path.join(config.SESSIONS_FOLDER, session_id)
 
 
 def get_session_upload_path(session_id):
@@ -187,7 +191,11 @@ def resolve_input_path(session_id, source='auto', step_key=None):
     return get_session_upload_path(session_id), 'original'
 
 
-def process_censored_data(session_id, sheet_name=None, left_coe=0.75, right_coe=1.25):
+def process_censored_data(session_id, sheet_name=None, left_coe=None, right_coe=None):
+    if left_coe is None:
+        left_coe = config.CENSOR_LEFT_COEFFICIENT
+    if right_coe is None:
+        right_coe = config.CENSOR_RIGHT_COEFFICIENT
     state = load_session_state(session_id)
     filepath = get_session_upload_path(session_id)
     sheet_name = sheet_name or state.get('sheet_name', 'Sheet1')
@@ -657,7 +665,9 @@ def _identify_coordinate_columns(df, session_id=None):
     return x_col, y_col
 
 
-def _idw_interpolation(x, y, values, grid_size=100, power=2):
+def _idw_interpolation(x, y, values, grid_size=100, power=2, k=12):
+    """IDW با cKDTree: فقط k همسایه نزدیک برای هر نقطه گرید (سریع و کم‌حافظه).
+    k پیشنهادی بین ۸ تا ۱۵ است و توسط کاربر قابل تنظیم است."""
     mask = ~(np.isnan(x) | np.isnan(y) | np.isnan(values))
     x_clean, y_clean, values_clean = x[mask], y[mask], values[mask]
     if len(x_clean) < 4:
@@ -670,13 +680,90 @@ def _idw_interpolation(x, y, values, grid_size=100, power=2):
     xi = np.linspace(x_min - x_pad, x_max + x_pad, grid_size)
     yi = np.linspace(y_min - y_pad, y_max + y_pad, grid_size)
     xi, yi = np.meshgrid(xi, yi)
-    zi = np.zeros_like(xi)
-    for i in range(grid_size):
-        for j in range(grid_size):
-            distances = np.sqrt((xi[i, j] - x_clean) ** 2 + (yi[i, j] - y_clean) ** 2)
-            weights = 1.0 / (distances ** power + 1e-10)
-            weights_sum = weights.sum()
-            zi[i, j] = np.sum(values_clean * weights) / weights_sum if weights_sum > 0 else np.nan
+
+    tree = cKDTree(np.column_stack([x_clean, y_clean]))
+    grid_points = np.column_stack([xi.ravel(), yi.ravel()])
+    kk = max(1, min(int(k), len(x_clean)))
+    dist, idx = tree.query(grid_points, k=kk, workers=-1)
+    dist = np.where(dist == 0, 1e-10, dist)  # جلوگیری از تقسیم بر صفر (نقطه روی داده)
+    weights = 1.0 / dist ** power
+    z = (weights * values_clean[idx]).sum(axis=1) / weights.sum(axis=1)
+    zi = z.reshape(xi.shape)
+    return xi, yi, zi
+
+
+def _kriging_interpolation(x, y, values, grid_size=None, method='ordinary', variogram_model='spherical', n_lags=6):
+    """کریجینگ با pykrige: Ordinary/Universal Kriging با واریوگرام انتخابی.
+    خروجی مثل بقیه روش‌ها (xi, yi, zi) است؛ نقاطی که واریانس کریجینگ بسیار بالاست
+    (خارج از محدوده داده‌ها) با NaN علامت‌گذاری می‌شوند تا در contourf رندر نشوند."""
+    try:
+        from pykrige.ok import OrdinaryKriging
+        from pykrige.uk import UniversalKriging
+    except ImportError as exc:
+        raise RuntimeError("کتابخانه pykrige نصب نیست. با دستور pip install pykrige آن را نصب کنید.") from exc
+
+    mask = ~(np.isnan(x) | np.isnan(y) | np.isnan(values))
+    x_clean, y_clean, values_clean = x[mask], y[mask], values[mask]
+    if len(x_clean) < 4:
+        return None, None, None
+
+    if grid_size is None:
+        grid_size = config.KRIGING_GRID_SIZE
+
+    x_min, x_max = x_clean.min(), x_clean.max()
+    y_min, y_max = y_clean.min(), y_clean.max()
+    x_pad = (x_max - x_min) * 0.05
+    y_pad = (y_max - y_min) * 0.05
+    gx = np.linspace(x_min - x_pad, x_max + x_pad, grid_size)
+    gy = np.linspace(y_min - y_pad, y_max + y_pad, grid_size)
+
+    # اگر x و y واحدهای متفاوتی دارند (مثل طول/عرض جغرافیایی)، مقیاس‌بندی
+    # یکنواخت واریوگرام نادرست می‌شود؛ برای این حالت مختصات را نرمال می‌کنیم.
+    x_range = gx[-1] - gx[0]
+    y_range = gy[-1] - gy[0]
+    use_normalized = (max(x_range, y_range) > 0) and (min(x_range, y_range) / max(x_range, y_range) < 0.01)
+    if use_normalized:
+        sx = 1.0 / x_range
+        sy = 1.0 / y_range
+        xk, yk = x_clean * sx, y_clean * sy
+        grid_x, grid_y = np.meshgrid(gx * sx, gy * sy)
+    else:
+        xk, yk = x_clean, y_clean
+        grid_x, grid_y = np.meshgrid(gx, gy)
+
+    kriging_kwargs = dict(
+        variogram_model=variogram_model,
+        nlags=n_lags,
+        enable_plotting=False,
+        coordinates_type='euclidean',
+    )
+    if method == 'universal':
+        uk_kwargs = {k: v for k, v in kriging_kwargs.items() if k != 'coordinates_type'}
+        krig = UniversalKriging(xk, yk, values_clean, **uk_kwargs)
+        zi, ss = krig.execute('grid', grid_x[0], grid_y[:, 0])
+    else:
+        krig = OrdinaryKriging(xk, yk, values_clean, **kriging_kwargs)
+        zi, ss = krig.execute('grid', grid_x[0], grid_y[:, 0])
+
+    # ماسک نقاط دارای واریانس خیلی بالا (بیرون از محدوده اعتبار داده‌ها)
+    try:
+        ss = np.asarray(ss, dtype=float)
+        valid = np.isfinite(ss) & (ss <= np.nanmax(ss[np.isfinite(ss)]) if np.any(np.isfinite(ss)) else True)
+        data_tree = cKDTree(np.column_stack([xk, yk]))
+        grid_pts = np.column_stack([grid_x.ravel(), grid_y.ravel()])
+        d_near, _ = data_tree.query(grid_pts, k=1)
+        # آستانه: نقطه‌ای که نزدیک‌ترین داده‌اش بیش از یک‌سوم گستره است، معتبر نیست
+        reach = 0.34 * max(x_range, y_range) if not use_normalized else 0.34
+        d_near = d_near.reshape(zi.shape)
+        valid = d_near <= reach
+        zi = np.where(valid, np.asarray(zi, dtype=float), np.nan)
+    except Exception:
+        pass
+
+    if use_normalized:
+        # گرید خروجی همیشه در مختصات اصلی برگردانده می‌شود
+        return gx[None, :].repeat(grid_size, axis=0), gy[:, None].repeat(grid_size, axis=1), zi
+    xi, yi = np.meshgrid(gx, gy)
     return xi, yi, zi
 
 
@@ -729,7 +816,8 @@ def _plot_element_map(x, y, values, element_name, output_dir, xi, yi, zi, cmap='
     return output_path.name
 
 
-def process_plots(session_id, source='auto', interpolation='idw', cmap='viridis', elements=None):
+def process_plots(session_id, source='auto', interpolation='idw', cmap='viridis', elements=None, idw_k=12,
+                  kriging_method='ordinary', kriging_variogram='spherical'):
     input_path, input_source = resolve_input_path(session_id, source=source, step_key='plots')
     df = pd.read_excel(input_path, engine='openpyxl')
     x_col, y_col = _identify_coordinate_columns(df, session_id=session_id)
@@ -754,8 +842,14 @@ def process_plots(session_id, source='auto', interpolation='idw', cmap='viridis'
         if np.sum(~np.isnan(values)) < 4:
             continue
         if interpolation == 'idw':
-            xi, yi, zi = _idw_interpolation(x_coords, y_coords, values)
-            method_name = 'IDW'
+            xi, yi, zi = _idw_interpolation(x_coords, y_coords, values, k=idw_k)
+            method_name = f'IDW (k={idw_k})'
+        elif interpolation == 'kriging':
+            xi, yi, zi = _kriging_interpolation(
+                x_coords, y_coords, values,
+                method=kriging_method, variogram_model=kriging_variogram,
+            )
+            method_name = f"Kriging ({'OK' if kriging_method == 'ordinary' else 'UK'}, {kriging_variogram})"
         else:
             xi, yi, zi = _create_grid(x_coords, y_coords, values, method=interpolation)
             method_name = interpolation.capitalize()
@@ -787,6 +881,7 @@ def process_plots(session_id, source='auto', interpolation='idw', cmap='viridis'
         'generated_files': generated,
         'x_column': x_col,
         'y_column': y_col,
+        'interpolation': interpolation,
         'count': len(generated),
     }
     save_session_state(session_id, state)
@@ -798,6 +893,7 @@ def process_plots(session_id, source='auto', interpolation='idw', cmap='viridis'
         'output_dir': plots_rel,
         'x_column': x_col,
         'y_column': y_col,
+        'interpolation': interpolation,
     }
 
 
@@ -1754,4 +1850,763 @@ def process_kmeans(session_id, source='auto', n_clusters=3, max_iter=300, n_init
         'elbow_data': {'k': k_range, 'inertias': inertias, 'sil_scores': sil_scores},
         'output_file': data_rel,
         'generated_plots': generated_plots,
+    }
+
+
+# ==================================================
+# Phase 2: Multifactor Analysis
+# ==================================================
+
+
+def _varimax_rotation(loadings, max_iter=500, tol=1e-5):
+    """چرخش Varimax (افقی) با نرمال‌سازی Kaiser — مطابق GPArotation/factor_analyzer."""
+    X = np.array(loadings, dtype=float).copy()
+    n_rows, n_cols = X.shape
+    if n_cols < 2:
+        return X, np.eye(n_cols)
+    normalized_mtx = np.sqrt((X ** 2).sum(axis=1))
+    normalized_mtx[normalized_mtx == 0] = 1.0
+    X = (X.T / normalized_mtx).T
+    rotation_mtx = np.eye(n_cols)
+    d = 0.0
+    for _ in range(max_iter):
+        old_d = d
+        basis = X @ rotation_mtx
+        diagonal = np.diag((basis ** 2).sum(axis=0))
+        transformed = X.T @ (basis ** 3 - basis @ diagonal / n_rows)
+        U, S, Vt = np.linalg.svd(transformed)
+        rotation_mtx = U @ Vt
+        d = S.sum()
+        if d < old_d * (1 + tol):
+            break
+    X = X @ rotation_mtx
+    X = (X.T * normalized_mtx).T
+    return X, rotation_mtx
+
+
+def _promax_rotation(loadings, power=4, max_iter=500, tol=1e-5):
+    """چرخش Promax (مایل) — مطابق factor_analyzer."""
+    X = np.array(loadings, dtype=float).copy()
+    _, n_cols = X.shape
+    if n_cols < 2:
+        return X.copy(), np.eye(n_cols), np.eye(n_cols)
+    h2 = (X ** 2).sum(axis=1, keepdims=True)
+    h2[h2 == 0] = 1.0
+    weights = X / np.sqrt(h2)
+    Xv, rotation_mtx = _varimax_rotation(weights, max_iter=max_iter, tol=tol)
+    Y = Xv * np.abs(Xv) ** (power - 1)
+    try:
+        coef = np.linalg.inv(Xv.T @ Xv) @ (Xv.T @ Y)
+    except np.linalg.LinAlgError:
+        coef = np.linalg.pinv(Xv.T @ Xv) @ (Xv.T @ Y)
+    try:
+        diag_inv = np.diag(np.linalg.inv(coef.T @ coef))
+    except np.linalg.LinAlgError:
+        diag_inv = np.diag(np.linalg.pinv(coef.T @ coef))
+    coef = coef @ np.diag(np.sqrt(np.abs(diag_inv)))
+    z = Xv @ coef
+    z = z * np.sqrt(h2)
+    rotation_mtx = rotation_mtx @ coef
+    coef_inv = np.linalg.inv(coef)
+    phi = coef_inv @ coef_inv.T  # ماتریس همبستگی فاکتورها (چرخش مایل)
+    return z, rotation_mtx, phi
+
+
+def process_factor_analysis(session_id, source='auto', n_factors=None, rotation='varimax'):
+    """تحلیل فاکتوری اکتشافی (EFA) با چرخش Varimax/Promax/بدون چرخش."""
+    df, df_numeric, numeric_cols, input_source = _prepare_multifactor_data(session_id, source=source)
+    n_samples = len(df_numeric)
+    k = len(numeric_cols)
+
+    # استانداردسازی (Z-score)
+    X = df_numeric.values.astype(float)
+    mean = X.mean(axis=0)
+    std = X.std(axis=0)
+    std[std == 0] = 1.0
+    Z = (X - mean) / std
+
+    # تعیین تعداد فاکتورها (قانون Kaiser) در صورت عدم تعیین توسط کاربر
+    eigenvalues = np.linalg.eigvalsh(np.corrcoef(Z, rowvar=False))[::-1]
+    if not n_factors:
+        n_factors = int((eigenvalues > 1).sum())
+    n_factors = max(1, min(int(n_factors), k))
+
+    fa = FactorAnalysis(n_components=n_factors, max_iter=1000, random_state=42)
+    fa.fit(Z)
+    raw_loadings = fa.components_.T  # (متغیرها × فاکتورها)
+
+    phi = None
+    if rotation == 'promax':
+        rot_loadings, rot_mtx, phi = _promax_rotation(raw_loadings)
+    elif rotation == 'varimax':
+        rot_loadings, rot_mtx = _varimax_rotation(raw_loadings)
+    else:
+        rotation = 'none'
+        rot_loadings, rot_mtx = raw_loadings, np.eye(n_factors)
+
+    factor_names = [f'F{i + 1}' for i in range(n_factors)]
+    loadings_df = pd.DataFrame(rot_loadings, index=numeric_cols, columns=factor_names).round(4)
+
+    # فاکتور با بیشترین بارگذاری مطلق برای هر متغیر
+    abs_load = np.abs(rot_loadings)
+    best_factor = [factor_names[i] for i in abs_load.argmax(axis=1)]
+    communalities = (rot_loadings ** 2).sum(axis=1)
+
+    commun_df = pd.DataFrame({
+        'ستون': numeric_cols,
+        'جامعیت': np.round(communalities, 4),
+        'واریانس منحصربه‌فرد': np.round(1 - communalities, 4),
+        'فاکتور اصلی': best_factor,
+    })
+
+    # واریانس توضیح‌داده‌شده هر فاکتور (برای چرخش مایل تقریبی)
+    var_each = (rot_loadings ** 2).sum(axis=0)
+    var_pct = 100 * var_each / k
+    var_df = pd.DataFrame({
+        'فاکتور': factor_names,
+        'بارگذاری مجموع مربع': np.round(var_each, 4),
+        'درصد واریانس (%)': np.round(var_pct, 2),
+        'تجمعی (%)': np.round(np.cumsum(var_pct), 2),
+    })
+
+    # نمرات فاکتوری (تخمین کمترین مربعات)
+    scores = Z @ np.linalg.pinv(rot_loadings).T
+    scores_df_out = pd.DataFrame()
+    id_cols = [c for c in df.columns if c not in numeric_cols][:3]
+    if id_cols:
+        scores_df_out = df.loc[df_numeric.index, id_cols].copy()
+    for i, fn in enumerate(factor_names):
+        scores_df_out[fn] = np.round(scores[:, i], 4)
+
+    # ── نمودارها ──
+    session_dir = get_session_dir(session_id)
+    plots_rel = PIPELINE_STEPS['multifactor_plots']
+    plots_dir = os.path.join(session_dir, plots_rel)
+    os.makedirs(plots_dir, exist_ok=True)
+    generated_plots = []
+
+    plt.figure(figsize=(10, max(4, 0.4 * k + 1)))
+    sns.heatmap(loadings_df, annot=True, fmt='.2f', cmap='RdBu_r', center=0,
+                linewidths=0.5, vmin=-1, vmax=1)
+    plt.title(f'Factor Loadings ({rotation})', fontsize=13, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, 'factor_loadings.png'), dpi=200, bbox_inches='tight')
+    plt.close()
+    generated_plots.append('factor_loadings.png')
+
+    plt.figure(figsize=(8, 5))
+    colors = ['#2ecc71' if e > 1 else '#95a5a6' for e in eigenvalues]
+    plt.bar(range(1, k + 1), eigenvalues, color=colors, edgecolor='white')
+    plt.axhline(1, color='red', linestyle='--', linewidth=1.5, label='Kaiser (λ=1)')
+    plt.xlabel('مؤلفه'); plt.ylabel('مقدار ویژه')
+    plt.title('Scree Plot', fontweight='bold')
+    plt.xticks(range(1, k + 1))
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, 'factor_scree.png'), dpi=200, bbox_inches='tight')
+    plt.close()
+    generated_plots.append('factor_scree.png')
+
+    # ── فایل اکسل ──
+    data_rel = PIPELINE_STEPS['multifactor']
+    data_path = os.path.join(session_dir, data_rel)
+    output_path = Path(data_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = output_path.with_name(f'{output_path.stem}.tmp{output_path.suffix}')
+    try:
+        with pd.ExcelWriter(tmp_path, engine='openpyxl') as writer:
+            loadings_df.to_excel(writer, sheet_name='بارگذاری فاکتورها', index=True)
+            commun_df.to_excel(writer, sheet_name='جامعیت‌ها', index=False)
+            var_df.to_excel(writer, sheet_name='توضیح واریانس', index=False)
+            scores_df_out.to_excel(writer, sheet_name='نمرات فاکتوری', index=False)
+            if phi is not None:
+                pd.DataFrame(np.round(phi, 4), index=factor_names, columns=factor_names).to_excel(
+                    writer, sheet_name='همبستگی فاکتورها', index=True)
+        tmp_path.replace(output_path)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+    state = load_session_state(session_id)
+    state['steps']['multifactor_factor_analysis'] = {
+        'output_file': data_rel,
+        'input_source': input_source,
+        'n_factors': n_factors,
+        'rotation': rotation,
+        'generated_plots': generated_plots,
+    }
+    save_session_state(session_id, state)
+
+    # JSON-safe: جدول بارگذاری‌ها به‌صورت ردیف
+    loadings_rows = []
+    for col in numeric_cols:
+        row = {'ستون': col}
+        for i, fn in enumerate(factor_names):
+            row[fn] = round(float(rot_loadings[numeric_cols.index(col), i]), 4)
+        row['جامعیت'] = round(float(communalities[numeric_cols.index(col)]), 4)
+        row['فاکتور اصلی'] = best_factor[numeric_cols.index(col)]
+        loadings_rows.append(row)
+
+    return {
+        'success': True,
+        'input_source': input_source,
+        'n_factors': n_factors,
+        'rotation': rotation,
+        'n_samples': n_samples,
+        'analyzed_columns': k,
+        'factor_names': factor_names,
+        'loadings': loadings_rows,
+        'variance': var_df.to_dict('records'),
+        'communalities': commun_df.to_dict('records'),
+        'output_file': data_rel,
+        'generated_plots': generated_plots,
+    }
+
+
+def process_element_association(session_id, source='auto', method='pearson', min_corr=0.5):
+    """گروه‌بندی عناصر بر اساس همبستگی قوی + نمودار شبکه‌ای."""
+    df, df_numeric, numeric_cols, input_source = _prepare_multifactor_data(session_id, source=source)
+    k = len(numeric_cols)
+    n = len(df_numeric)
+    corr = df_numeric.corr(method=method)
+
+    pairs = []
+    adj = {c: set() for c in numeric_cols}
+    for i in range(k):
+        for j in range(i + 1, k):
+            r = float(corr.iloc[i, j])
+            if not np.isnan(r) and abs(r) >= min_corr:
+                pairs.append({
+                    'ستون ۱': numeric_cols[i],
+                    'ستون ۲': numeric_cols[j],
+                    'همبستگی': round(r, 4),
+                })
+                adj[numeric_cols[i]].add(numeric_cols[j])
+                adj[numeric_cols[j]].add(numeric_cols[i])
+    pairs.sort(key=lambda x: abs(x['همبستگی']), reverse=True)
+
+    # گروه‌بندی: اقلام متصل‌شده (اقلام مرتبط با هم در یک گروه)
+    groups = []
+    seen = set()
+    for c in numeric_cols:
+        if c in seen:
+            continue
+        comp = []
+        stack = [c]
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            comp.append(node)
+            stack.extend(adj[node] - seen)
+        if len(comp) >= 2:
+            groups.append(sorted(comp))
+    groups.sort(key=len, reverse=True)
+
+    group_rows = []
+    for gi, g in enumerate(groups, start=1):
+        for member in g:
+            group_rows.append({'گروه': f'G{gi}', 'تعداد اعضا': len(g), 'عنصر': member})
+
+    # ── نمودار شبکه‌ای دایره‌ای ──
+    session_dir = get_session_dir(session_id)
+    plots_rel = PIPELINE_STEPS['multifactor_plots']
+    plots_dir = os.path.join(session_dir, plots_rel)
+    os.makedirs(plots_dir, exist_ok=True)
+    generated_plots = []
+
+    angles = {c: 2 * np.pi * idx / k for idx, c in enumerate(numeric_cols)}
+    pos = {c: (np.cos(a), np.sin(a)) for c, a in angles.items()}
+    palette = plt.cm.tab20(np.linspace(0, 1, 20))
+    node_color = {}
+    for gi, g in enumerate(groups):
+        for member in g:
+            node_color[member] = palette[gi % 20]
+    for c in numeric_cols:
+        if c not in node_color:
+            node_color[c] = (0.7, 0.7, 0.7, 1.0)
+
+    plt.figure(figsize=(11, 11))
+    for p in pairs:
+        x1, y1 = pos[p['ستون ۱']]
+        x2, y2 = pos[p['ستون ۲']]
+        lw = 1 + 3 * abs(p['همبستگی'])
+        color = '#27ae60' if p['همبستگی'] > 0 else '#e74c3c'
+        plt.plot([x1, x2], [y1, y2], color=color, alpha=0.45, linewidth=lw, zorder=1)
+    for c in numeric_cols:
+        x, y = pos[c]
+        plt.scatter([x], [y], s=450, color=node_color[c], edgecolors='black', zorder=2)
+        lx = 1.18 * np.cos(angles[c])
+        ly = 1.18 * np.sin(angles[c])
+        ha = 'left' if lx > 0.05 else ('right' if lx < -0.05 else 'center')
+        va = 'bottom' if ly > 0.05 else ('top' if ly < -0.05 else 'center')
+        plt.text(lx, ly, c, fontsize=10, fontweight='bold', ha=ha, va=va)
+    plt.xlim(-1.55, 1.55)
+    plt.ylim(-1.55, 1.55)
+    plt.gca().set_aspect('equal')
+    plt.axis('off')
+    plt.title(f'Element Association Network (|r| ≥ {min_corr}, {method})',
+              fontsize=13, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, 'element_association_network.png'), dpi=200, bbox_inches='tight')
+    plt.close()
+    generated_plots.append('element_association_network.png')
+
+    # ── فایل اکسل ──
+    data_rel = PIPELINE_STEPS['multifactor']
+    data_path = os.path.join(session_dir, data_rel)
+    pairs_df = pd.DataFrame(pairs)
+    groups_df = pd.DataFrame(group_rows)
+    output_path = Path(data_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = output_path.with_name(f'{output_path.stem}.tmp{output_path.suffix}')
+    try:
+        with pd.ExcelWriter(tmp_path, engine='openpyxl') as writer:
+            if not pairs_df.empty:
+                pairs_df.to_excel(writer, sheet_name='جفت‌های قوی', index=False)
+            if not groups_df.empty:
+                groups_df.to_excel(writer, sheet_name='گروه‌های عنصری', index=False)
+            corr.round(4).to_excel(writer, sheet_name=f'همبستگی_{method}', index=True)
+        tmp_path.replace(output_path)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+    state = load_session_state(session_id)
+    state['steps']['multifactor_association'] = {
+        'output_file': data_rel,
+        'input_source': input_source,
+        'method': method,
+        'min_corr': min_corr,
+        'n_groups': len(groups),
+        'n_pairs': len(pairs),
+        'generated_plots': generated_plots,
+    }
+    save_session_state(session_id, state)
+
+    return {
+        'success': True,
+        'input_source': input_source,
+        'method': method,
+        'min_corr': min_corr,
+        'n_samples': n,
+        'analyzed_columns': k,
+        'n_pairs': len(pairs),
+        'pairs': pairs[:30],
+        'groups': [f'G{i + 1}' for i in range(len(groups))],
+        'group_details': [
+            {'گروه': f'G{i + 1}', 'تعداد': len(g), 'اعضا': ', '.join(g)}
+            for i, g in enumerate(groups)
+        ],
+        'output_file': data_rel,
+        'generated_plots': generated_plots,
+    }
+
+
+def process_mahalanobis(session_id, source='auto', confidence=0.975):
+    """فاصله مربع ماهالانوبی هر نمونه و تشخیص آنومالی با آستانه χ²."""
+    df, df_numeric, numeric_cols, input_source = _prepare_multifactor_data(session_id, source=source)
+    X = df_numeric.values.astype(float)
+    n, k = X.shape
+    confidence = min(max(float(confidence), 0.5), 0.999)
+
+    mean = X.mean(axis=0)
+    cov = np.cov(X, rowvar=False)
+    inv_cov = np.linalg.pinv(cov)
+    diff = X - mean
+    d2 = np.einsum('ij,jk,ik->i', diff, inv_cov, diff)
+    p_vals = stats.chi2.sf(d2, k)
+    threshold = float(stats.chi2.ppf(confidence, k))
+    is_anomaly = d2 > threshold
+    n_anomaly = int(is_anomaly.sum())
+
+    # ── نمودار هیستوگرام D² ──
+    session_dir = get_session_dir(session_id)
+    plots_rel = PIPELINE_STEPS['multifactor_plots']
+    plots_dir = os.path.join(session_dir, plots_rel)
+    os.makedirs(plots_dir, exist_ok=True)
+    generated_plots = []
+
+    plt.figure(figsize=(9, 5))
+    plt.hist(d2, bins=30, color='steelblue', edgecolor='white', alpha=0.85)
+    plt.axvline(threshold, color='red', linestyle='--', linewidth=2,
+                label=f'آستانه χ²({confidence}) = {threshold:.2f}')
+    plt.xlabel('فاصله ماهالانوبی D²')
+    plt.ylabel('تعداد نمونه')
+    plt.title('Distribution of Mahalanobis D²', fontweight='bold')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(plots_dir, 'mahalanobis_hist.png'), dpi=200, bbox_inches='tight')
+    plt.close()
+    generated_plots.append('mahalanobis_hist.png')
+
+    # ── جدول نمرات ──
+    id_cols = [c for c in df.columns if c not in numeric_cols][:3]
+    out = df.loc[df_numeric.index, id_cols].copy() if id_cols else pd.DataFrame(index=df_numeric.index)
+    out['D2'] = np.round(d2, 4)
+    out['p-value'] = np.round(p_vals, 6)
+    out['آنومالی'] = np.where(is_anomaly, 'بله', 'خیر')
+
+    summary_df = pd.DataFrame([
+        {'پارامتر': 'تعداد نمونه‌ها', 'مقدار': n},
+        {'پارامتر': 'تعداد متغیرها (k)', 'مقدار': k},
+        {'پارامتر': f'اطمینان آستانه χ²', 'مقدار': confidence},
+        {'پارامتر': 'آستانه D²', 'مقدار': round(threshold, 4)},
+        {'پارامتر': 'حداکثر D² مشاهده‌شده', 'مقدار': round(float(d2.max()), 4)},
+        {'پارامتر': 'میانه D²', 'مقدار': round(float(np.median(d2)), 4)},
+        {'پارامتر': 'تعداد آنومالی', 'مقدار': n_anomaly},
+        {'پارامتر': 'درصد آنومالی (%)', 'مقدار': round(100 * n_anomaly / n, 2) if n else 0},
+    ])
+
+    # ── فایل اکسل ──
+    data_rel = PIPELINE_STEPS['multifactor']
+    data_path = os.path.join(session_dir, data_rel)
+    output_path = Path(data_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = output_path.with_name(f'{output_path.stem}.tmp{output_path.suffix}')
+    try:
+        with pd.ExcelWriter(tmp_path, engine='openpyxl') as writer:
+            out.to_excel(writer, sheet_name='نمرات D2', index=True)
+            summary_df.to_excel(writer, sheet_name='خلاصه', index=False)
+        tmp_path.replace(output_path)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+    state = load_session_state(session_id)
+    state['steps']['multifactor_mahalanobis'] = {
+        'output_file': data_rel,
+        'input_source': input_source,
+        'confidence': confidence,
+        'threshold': round(threshold, 4),
+        'n_anomaly': n_anomaly,
+        'generated_plots': generated_plots,
+    }
+    save_session_state(session_id, state)
+
+    # ۱۰ نمونه با بالاترین D² برای نمایش در UI
+    top_idx = np.argsort(d2)[::-1][:10]
+    top_rows = []
+    for idx in top_idx:
+        row = {'ردیف': int(df_numeric.index[idx]), 'D2': round(float(d2[idx]), 4),
+               'p-value': round(float(p_vals[idx]), 6),
+               'آنومالی': 'بله' if is_anomaly[idx] else 'خیر'}
+        for c in id_cols:
+            row[c] = str(df.loc[df_numeric.index[idx], c])
+        top_rows.append(row)
+
+    return {
+        'success': True,
+        'input_source': input_source,
+        'n_samples': n,
+        'analyzed_columns': k,
+        'confidence': confidence,
+        'threshold': round(threshold, 4),
+        'max_d2': round(float(d2.max()), 4),
+        'median_d2': round(float(np.median(d2)), 4),
+        'n_anomaly': n_anomaly,
+        'anomaly_percent': round(100 * n_anomaly / n, 2) if n else 0,
+        'top_rows': top_rows,
+        'output_file': data_rel,
+        'generated_plots': generated_plots,
+    }
+
+# ==================================================
+# Duplicate QC Analysis (Thompson-Howarth / RPD)
+# ==================================================
+
+
+def _fix_censored_value_numeric(val, left_coe, right_coe):
+    fixed = _fix_censored_value(val, left_coe, right_coe)
+    try:
+        f = float(fixed)
+        return np.nan if np.isnan(f) else f
+    except (TypeError, ValueError):
+        return np.nan
+
+
+def _duplicate_pairs_values(duplicate_samples, duplicate_data, element, left_coe, right_coe):
+    pairs = []
+    for _, row in duplicate_samples.iterrows():
+        orig_sample = str(row['Sample_ID']).strip()
+        dup_sample = str(row['Duplicated_Sample_ID']).strip()
+        orig_rows = duplicate_data[duplicate_data['Sample_ID'].astype(str).str.strip() == orig_sample]
+        dup_rows = duplicate_data[duplicate_data['Sample_ID'].astype(str).str.strip() == dup_sample]
+        if orig_rows.empty or dup_rows.empty:
+            continue
+        ov = _fix_censored_value_numeric(orig_rows[element].iloc[0], left_coe, right_coe)
+        dv = _fix_censored_value_numeric(dup_rows[element].iloc[0], left_coe, right_coe)
+        if np.isnan(ov) or np.isnan(dv):
+            continue
+        pairs.append((ov, dv))
+    return pairs
+
+
+def _dup_plot_pairs(orig_values, dup_values, element):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    if len(orig_values) == 0:
+        ax.text(0.5, 0.5, 'No data', ha='center', va='center', transform=ax.transAxes)
+        return fig
+    vmax = max(max(orig_values), max(dup_values))
+    vmin = min(min(orig_values), min(dup_values))
+    rng = (vmax - vmin) or abs(vmax) * 0.1 or 1.0
+    lo, hi = vmin - rng * 0.05, vmax + rng * 0.05
+    ax.scatter(orig_values, dup_values, alpha=0.6, s=60)
+    ax.plot([lo, hi], [lo, hi], 'r--', linewidth=2, label='1:1 Line')
+    ax.plot([lo, hi], [lo * 0.9, hi * 0.9], 'k:', linewidth=1, label='+/-10%')
+    ax.plot([lo, hi], [lo * 1.1, hi * 1.1], 'k:', linewidth=1)
+    ax.set_xlabel('Original Sample')
+    ax.set_ylabel('Duplicate Sample')
+    ax.set_title(f'Original vs Duplicate - {element}')
+    ax.legend(loc='upper left')
+    ax.grid(True, alpha=0.3)
+    return fig
+
+
+def _dup_plot_thompson_howarth(means, abs_diffs, mean_rpd, element):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    valid = [(m, d) for m, d in zip(means, abs_diffs) if m > 0 and d > 0]
+    if not valid:
+        ax.text(0.5, 0.5, 'No positive data for log scale', ha='center', va='center', transform=ax.transAxes)
+        return fig
+    vm = np.array([m for m, _ in valid])
+    vd = np.array([d for _, d in valid])
+    ax.scatter(vm, vd, alpha=0.6, s=60)
+    x_reg = np.logspace(np.log10(vm.min()), np.log10(vm.max()), 100)
+    ax.plot(x_reg, x_reg * 0.1, 'g:', linewidth=1.5, label='10% Error')
+    ax.plot(x_reg, x_reg * 0.2, 'b:', linewidth=1.5, label='20% Error')
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_xlabel('Mean Concentration')
+    ax.set_ylabel('Absolute Difference')
+    ax.set_title(f'Thompson-Howarth - {element}')
+    ax.text(0.02, 0.98, f'Mean RPD: {mean_rpd:.1f}%', transform=ax.transAxes,
+            bbox=dict(facecolor='white', alpha=0.8), verticalalignment='top', fontsize=10)
+    ax.legend(loc='upper left', bbox_to_anchor=(0.02, 0.90), fontsize=9)
+    ax.grid(True, which='both', ls='-', alpha=0.2)
+    return fig
+
+
+def _dup_plot_comparison(orig_values, dup_values, element):
+    fig, ax = plt.subplots(figsize=(12, 5))
+    idx = np.arange(1, len(orig_values) + 1)
+    ax.plot(idx, orig_values, 'b-o', label='Original', linewidth=1.5, markersize=5, alpha=0.7)
+    ax.plot(idx, dup_values, 'r--o', label='Duplicate', linewidth=1.5, markersize=5, alpha=0.7)
+    ax.set_xlabel('Pair Number')
+    ax.set_ylabel('Concentration')
+    ax.set_title(f'Comparison - {element}')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    return fig
+
+
+def _dup_plot_rpd_hist(rpd_values, element):
+    fig, ax = plt.subplots(figsize=(8, 6))
+    rpd_clean = [r for r in rpd_values if np.isfinite(r)]
+    ax.hist(rpd_clean, bins=min(20, max(5, len(rpd_clean))), color='#3498db', alpha=0.75, edgecolor='white')
+    ax.axvline(x=10, color='orange', linestyle='--', linewidth=1.5, label='10%')
+    ax.axvline(x=20, color='red', linestyle='--', linewidth=1.5, label='20%')
+    ax.set_xlabel('RPD (%)')
+    ax.set_ylabel('Frequency')
+    ax.set_title(f'RPD Distribution - {element}')
+    ax.legend()
+    ax.grid(True, axis='y', alpha=0.3)
+    return fig
+
+
+def _dup_categorize(mean_rpd, std_rpd):
+    if mean_rpd <= 10 and std_rpd <= 10:
+        return 'خوب'
+    if mean_rpd <= 20 and std_rpd <= 20:
+        return 'قابل قبول'
+    return 'ضعیف'
+
+
+def process_duplicate_qc(session_id, sheet_name=None, source='original',
+                         elements=None, left_coe=None, right_coe=None, max_elements=20):
+    """تحلیل داده‌های تکراری (Duplicate QC): RPD + نمودارهای Thompson-Howarth.
+
+    source='original': فایل آپلودی باید شیت‌های 'Duplicate Samples' + 'Duplicate_Data' داشته باشد.
+    source='auto': زوج‌های هم‌جوار در داده پردازش‌شده (ردیف فرد=اصلی، زوج=تکراری).
+    """
+    if left_coe is None:
+        left_coe = config.CENSOR_LEFT_COEFFICIENT
+    if right_coe is None:
+        right_coe = config.CENSOR_RIGHT_COEFFICIENT
+
+    state = load_session_state(session_id)
+    session_dir = get_session_dir(session_id)
+
+    if source == 'auto':
+        input_path, input_source = resolve_input_path(session_id, source='auto', step_key='duplicates')
+        df_all = pd.read_excel(input_path, engine='openpyxl')
+        x_col, y_col = _identify_coordinate_columns(df_all, session_id=session_id)
+        numeric_cols = df_all.select_dtypes(include=[np.number]).columns.tolist()
+        elements_all = [c for c in numeric_cols if c not in (x_col, y_col)]
+        if not elements_all:
+            raise ValueError('ستون عددی برای تحلیل تکراری یافت نشد')
+        duplicate_pairs = {}
+        for element in elements_all:
+            vals = df_all[element].apply(
+                lambda v: _fix_censored_value_numeric(v, left_coe, right_coe)
+            ).dropna().values
+            if len(vals) < 4:
+                continue
+            orig, dup = vals[0::2], vals[1::2]
+            m = min(len(orig), len(dup))
+            if m >= 4:
+                duplicate_pairs[element] = (orig[:m], dup[:m])
+        pair_source = 'adjacent-rows (auto)'
+    else:
+        input_path, input_source = get_session_upload_path(session_id), 'original'
+        excel = pd.ExcelFile(input_path)
+        available = set(excel.sheet_names)
+        ds_sheet = next((s for s in ('Duplicate Samples', 'Duplicate_Samples', 'DuplicateSamples') if s in available), None)
+        dd_sheet = next((s for s in ('Duplicate_Data', 'Duplicate Data', 'DuplicateData') if s in available), None)
+        if not ds_sheet or not dd_sheet:
+            raise ValueError(
+                "شیت‌های 'Duplicate Samples' و 'Duplicate_Data' در فایل یافت نشد. "
+                f"شیت‌های موجود: {', '.join(available)}"
+            )
+        duplicate_samples = pd.read_excel(input_path, sheet_name=ds_sheet)
+        duplicate_data = pd.read_excel(input_path, sheet_name=dd_sheet)
+        if 'Sample_ID' not in duplicate_data.columns:
+            raise ValueError("ستون 'Sample_ID' در شیت Duplicate_Data یافت نشد")
+        if 'Sample_ID' not in duplicate_samples.columns or 'Duplicated_Sample_ID' not in duplicate_samples.columns:
+            raise ValueError("شیت 'Duplicate Samples' باید ستون‌های 'Sample_ID' و 'Duplicated_Sample_ID' داشته باشد")
+        pair_source = 'id-based'
+        duplicate_pairs = {}
+        for element in duplicate_data.columns:
+            if element == 'Sample_ID':
+                continue
+            pairs = _duplicate_pairs_values(duplicate_samples, duplicate_data, element, left_coe, right_coe)
+            if len(pairs) >= 4:
+                duplicate_pairs[element] = (np.array([p[0] for p in pairs]), np.array([p[1] for p in pairs]))
+
+    if not duplicate_pairs:
+        raise ValueError('زوج تکراری معتبر (حداقل ۴ زوج) برای هیچ عنصری یافت نشد')
+
+    if elements:
+        elements_selected = [e for e in elements if e in duplicate_pairs]
+        if not elements_selected:
+            raise ValueError('هیچ‌کدام از عناصر انتخابی زوج تکراری معتبر ندارند')
+    else:
+        elements_selected = sorted(duplicate_pairs, key=lambda e: -len(duplicate_pairs[e][0]))[:max_elements]
+
+    plots_dir_rel = os.path.join('output', 'duplicates')
+    plots_dir = os.path.join(session_dir, plots_dir_rel)
+    os.makedirs(plots_dir, exist_ok=True)
+
+    stats_records = []
+    for element in elements_selected:
+        orig_values, dup_values = duplicate_pairs[element]
+        n_pairs = len(orig_values)
+        diff = np.abs(orig_values - dup_values)
+        denom = (orig_values + dup_values) / 2
+        rpd = np.where(denom != 0, diff / np.where(denom == 0, 1, denom) * 100, 0.0)
+        mean_rpd = float(np.mean(rpd))
+        std_rpd = float(np.std(rpd))
+        category = _dup_categorize(mean_rpd, std_rpd)
+        means = (orig_values + dup_values) / 2
+
+        safe = re.sub(r'[^\w\-]', '_', str(element))
+        plot_jobs = (
+            (lambda: _dup_plot_pairs(orig_values, dup_values, element), f'{safe}_pairs.png'),
+            (lambda: _dup_plot_thompson_howarth(means, diff, mean_rpd, element), f'{safe}_thompson_howarth.png'),
+            (lambda: _dup_plot_comparison(orig_values, dup_values, element), f'{safe}_comparison.png'),
+            (lambda: _dup_plot_rpd_hist(rpd, element), f'{safe}_rpd_hist.png'),
+        )
+        for plot_fn, fname in plot_jobs:
+            fig = plot_fn()
+            try:
+                fig.tight_layout()
+                fig.savefig(os.path.join(plots_dir, fname), dpi=150, bbox_inches='tight')
+            finally:
+                plt.close(fig)
+
+        stats_records.append({
+            'Element': str(element),
+            'N_Pairs': n_pairs,
+            'Mean_RPD': round(mean_rpd, 2),
+            'Median_RPD': round(float(np.median(rpd)), 2),
+            'Std_RPD': round(std_rpd, 2),
+            'Max_RPD': round(float(np.max(rpd)), 2),
+            'Samples_Above_10': int(np.sum(rpd > 10)),
+            'Percent_Above_10': round(100 * float(np.sum(rpd > 10)) / n_pairs, 1),
+            'Samples_Above_20': int(np.sum(rpd > 20)),
+            'Percent_Above_20': round(100 * float(np.sum(rpd > 20)) / n_pairs, 1),
+            'Original_Mean': round(float(np.mean(orig_values)), 4),
+            'Duplicate_Mean': round(float(np.mean(dup_values)), 4),
+            'Quality_Category': category,
+        })
+
+    stats_df = pd.DataFrame(stats_records).sort_values('Mean_RPD', ascending=False)
+
+    fig, ax = plt.subplots(figsize=(max(10, 0.8 * len(stats_df)), 6))
+    colors = {'خوب': '#2ecc71', 'قابل قبول': '#f39c12', 'ضعیف': '#e74c3c'}
+    bars = ax.bar(stats_df['Element'], stats_df['Mean_RPD'],
+                  color=[colors[c] for c in stats_df['Quality_Category']])
+    for bar, cat in zip(bars, stats_df['Quality_Category']):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3, cat, ha='center', fontsize=8)
+    ax.axhline(y=10, color='orange', linestyle='--', linewidth=1.5, label='10% Threshold')
+    ax.axhline(y=20, color='red', linestyle='--', linewidth=1.5, label='20% Threshold')
+    ax.set_xlabel('Element')
+    ax.set_ylabel('Mean RPD (%)')
+    ax.set_title('Mean RPD by Element (colored by Quality)')
+    ax.legend()
+    ax.grid(True, axis='y', alpha=0.3)
+    plt.xticks(rotation=45, ha='right')
+    fig.tight_layout()
+    fig.savefig(os.path.join(plots_dir, 'summary_mean_rpd.png'), dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+    pair_rows = []
+    for element in elements_selected:
+        orig_values, dup_values = duplicate_pairs[element]
+        for i, (o, d) in enumerate(zip(orig_values, dup_values), 1):
+            denom = (o + d) / 2
+            rpd_pair = abs(o - d) / denom * 100 if denom != 0 else 0
+            pair_rows.append({'Element': str(element), 'Pair_No': i, 'Original': o,
+                              'Duplicate': d, 'Abs_Diff': abs(o - d), 'RPD_%': round(rpd_pair, 2)})
+
+    output_rel = os.path.join('output', 'duplicates', 'analytical_error_analysis.xlsx')
+    output_path = os.path.join(session_dir, output_rel)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+        stats_df.to_excel(writer, sheet_name='خلاصه عناصر', index=False)
+        pd.DataFrame(pair_rows).to_excel(writer, sheet_name='جزئیات زوج‌ها', index=False)
+        pd.DataFrame([{
+            'منبع داده': input_source,
+            'نوع زوج‌ها': pair_source,
+            'تعداد عناصر تحلیل‌شده': len(stats_df),
+            'تعداد کل زوج‌ها': int(sum(len(duplicate_pairs[e][0]) for e in elements_selected)),
+            'ضرایب سانسور': f'< ×{left_coe} | > ×{right_coe}',
+            'تاریخ': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        }]).to_excel(writer, sheet_name='تنظیمات', index=False)
+
+    state['steps']['duplicates'] = {
+        'output_file': output_rel,
+        'output_dir': plots_dir_rel,
+        'input_source': input_source,
+        'pair_source': pair_source,
+        'elements': [str(e) for e in elements_selected],
+        'count': len(stats_df),
+    }
+    save_session_state(session_id, state)
+
+    return {
+        'success': True,
+        'input_source': input_source,
+        'pair_source': pair_source,
+        'n_pairs_total': int(sum(len(duplicate_pairs[e][0]) for e in elements_selected)),
+        'elements': [str(e) for e in elements_selected],
+        'stats': stats_records,
+        'output_file': output_rel,
+        'plots_dir': plots_dir_rel,
+        'left_coe': left_coe,
+        'right_coe': right_coe,
     }

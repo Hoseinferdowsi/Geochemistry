@@ -158,4 +158,5 @@ if __name__ == '__main__':
     # Create necessary directories if they don't exist
     os.makedirs('uploads', exist_ok=True)
     os.makedirs('output', exist_ok=True)
-    app.run(debug=True) 
+    debug_mode = os.environ.get('FLASK_DEBUG', '0').lower() in ('1', 'true', 'yes')
+    app.run(debug=debug_mode)

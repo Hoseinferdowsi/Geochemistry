@@ -19,11 +19,10 @@ openpyxl==3.1.5
 packaging==25.0
 pandas==2.2.3
 pillow==11.2.1
+pykrige==1.7.3
 pyparsing==3.2.3
 python-dateutil==2.9.0.post0
-pytz==2025.2
-requests==2.32.3
-scipy==1.15.3
+pytz==2025.2requests==2.32.3scikit-learn==1.9.0scipy==1.15.3
 seaborn==0.13.2
 six==1.17.0
 tzdata==2025.2

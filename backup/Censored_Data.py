@@ -1,3 +1,7 @@
+# ⚠️ منسوخ - فقط برای ارجاع.
+# منطق وباپ اصلی در processing_services.py (process_censored_data) است.
+# توجه: ضریب right_coe در این فایل 1.33 ولی در وب‌اپ 1.25 است؛
+# اجرای این اسکریپت مستقل خروجی متفاوتی با وباپ می‌دهد.
 import pandas as pd
 import re
 

@@ -295,6 +295,11 @@
                         <span class="step-badge">8</span> تحلیل چندفاکتوری
                     </button>
                 </li>
+                <li class="nav-item">
+                    <button class="nav-link disabled-tab" id="tab-duplicates-btn" data-bs-toggle="tab" data-bs-target="#tab-duplicates" type="button">
+                        <span class="step-badge">9</span> داده‌های تکراری
+                    </button>
+                </li>
             </ul>
 
             <div class="tab-content" id="analysisTabContent">
@@ -576,8 +581,9 @@
                             </div>
                             <div class="col-md-3">
                                 <label>روش درون‌یابی:</label>
-                                <select id="plotsInterpolation" class="form-control form-control-custom">
+                                <select id="plotsInterpolation" class="form-control form-control-custom" onchange="togglePlotMethodOptions()">
                                     <option value="idw">IDW (پیشنهادی)</option>
+                                    <option value="kriging">کریجینگ (Kriging)</option>
                                     <option value="linear">Linear</option>
                                     <option value="cubic">Cubic</option>
                                     <option value="nearest">Nearest</option>
@@ -591,6 +597,46 @@
                                     <option value="hot">Hot</option>
                                     <option value="coolwarm">Coolwarm</option>
                                 </select>
+                            </div>
+                        </div>
+                        <div class="row g-3 mb-3 mt-1">
+                            <div class="col-md-3" id="plotsIdwOptions">
+                                <label>تعداد همسایه‌های IDW (۸ تا ۱۵):</label>
+                                <input type="number" id="plotsIdwK" class="form-control form-control-custom" value="12" min="4" max="30" step="1">
+                                <small class="text-muted d-block mt-1">فقط برای روش IDW</small>
+                            </div>
+                            <div class="col-md-6" id="plotsKrigingOptions" style="display:none">
+                                <div class="row g-2">
+                                    <div class="col-6">
+                                        <label>نوع کریجینگ:</label>
+                                        <select id="plotsKrigingMethod" class="form-control form-control-custom">
+                                            <option value="ordinary">Ordinary (OK)</option>
+                                            <option value="universal">Universal (UK)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-6">
+                                        <label>واریوگرام:</label>
+                        <select id="plotsKrigingVariogram" class="form-control form-control-custom">
+                                            <option value="spherical">Spherical</option>
+                                            <option value="exponential">Exponential</option>
+                                            <option value="gaussian">Gaussian</option>
+                                            <option value="linear">Linear</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <small class="text-muted d-block mt-1">فقط برای روش کریجینگ — سنگین‌تر از IDW است</small>
+                            </div>
+                            <div class="col-md-9">
+                                <label>عناصر مورد نظر برای نقشه (خالی = همه عناصر):</label>
+                                <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                                    <input type="text" id="plotsElementFilter" class="form-control form-control-custom" style="max-width:260px" placeholder="جست‌وجوی نام عنصر..." oninput="filterPlotElements()">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectPlotElements(true)">انتخاب همه</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectPlotElements(false)">حذف انتخاب</button>
+                                    <span class="text-muted small" id="plotsElementCount">0 از 0 عنصر انتخاب شده</span>
+                                </div>
+                                <div id="plotsElementsBox" class="border rounded p-2" style="max-height:180px; overflow-y:auto; display:flex; flex-wrap:wrap; gap:4px 18px;">
+                                    <span class="text-muted small">پس از آپلود فایل، لیست عناصر نمایش داده می‌شود.</span>
+                                </div>
                             </div>
                         </div>
                         <button class="btn btn-custom" onclick="processPlots()">
@@ -705,6 +751,21 @@
                             <li class="nav-item">
                                 <button class="nav-link" data-subtab="kmeans" onclick="switchMultifactorSubTab('kmeans')">
                                     <i class="fas fa-object-group"></i> K-Means
+                                </button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-subtab="factor" onclick="switchMultifactorSubTab('factor')">
+                                    <i class="fas fa-flask"></i> تحلیل فاکتوری
+                                </button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-subtab="association" onclick="switchMultifactorSubTab('association')">
+                                    <i class="fas fa-project-diagram"></i> ارتباط عناصر
+                                </button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link" data-subtab="mahalanobis" onclick="switchMultifactorSubTab('mahalanobis')">
+                                    <i class="fas fa-ruler-vertical"></i> فاصله ماهالانوبی
                                 </button>
                             </li>
                         </ul>
@@ -852,6 +913,144 @@
                             <div class="result-box" id="kmeansResult"></div>
                         </div>
 
+                        <!-- Sub-tab: Factor Analysis (Phase 2) -->
+                        <div id="subtab-factor" class="multifactor-subtab" style="display:none">
+                            <h6><i class="fas fa-flask text-primary"></i> تحلیل فاکتوری اکتشافی (EFA)</h6>
+                            <p class="text-muted small">شناسایی فاکتورهای پنهان با چرخش Varimax یا Promax + بارگذاری‌ها، جامعیت‌ها و نمرات فاکتوری</p>
+                            <div class="row g-2 mb-3">
+                                <div class="col-md-3">
+                                    <label>تعداد فاکتورها (خالی = خودکار Kaiser):</label>
+                                    <input type="number" id="faNFactors" class="form-control form-control-custom" placeholder="خودکار" min="1">
+                                </div>
+                                <div class="col-md-3">
+                                    <label>نوع چرخش:</label>
+                                    <select id="faRotation" class="form-control form-control-custom">
+                                        <option value="varimax">Varimax (افقی — توصیه شده)</option>
+                                        <option value="promax">Promax (مایل)</option>
+                                        <option value="none">بدون چرخش</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 d-flex align-items-end">
+                                    <button class="btn btn-custom" onclick="processFactorAnalysis()">
+                                        <i class="fas fa-play"></i> اجرا
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="loading-spinner" id="factorLoading">
+                                <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
+                                <p>در حال پردازش...</p>
+                            </div>
+                            <div class="result-box" id="factorResult"></div>
+                        </div>
+
+                        <!-- Sub-tab: Element Association (Phase 2) -->
+                        <div id="subtab-association" class="multifactor-subtab" style="display:none">
+                            <h6><i class="fas fa-project-diagram text-primary"></i> گروه‌بندی و ارتباط عناصر</h6>
+                            <p class="text-muted small">گروه‌بندی عناصر با همبستگی قوی + نمودار شبکه‌ای ارتباطات</p>
+                            <div class="row g-2 mb-3">
+                                <div class="col-md-3">
+                                    <label>روش همبستگی:</label>
+                                    <select id="assocMethod" class="form-control form-control-custom">
+                                        <option value="pearson">Pearson</option>
+                                        <option value="spearman">Spearman</option>
+                                        <option value="kendall">Kendall</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label>حداقل قدر مطلق همبستگی:</label>
+                                    <input type="number" id="assocMinCorr" class="form-control form-control-custom" value="0.5" min="0.1" max="0.99" step="0.05">
+                                </div>
+                                <div class="col-md-3 d-flex align-items-end">
+                                    <button class="btn btn-custom" onclick="processElementAssociation()">
+                                        <i class="fas fa-play"></i> اجرا
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="loading-spinner" id="associationLoading">
+                                <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
+                                <p>در حال پردازش...</p>
+                            </div>
+                            <div class="result-box" id="associationResult"></div>
+                        </div>
+
+                        <!-- Sub-tab: Mahalanobis (Phase 2) -->
+                        <div id="subtab-mahalanobis" class="multifactor-subtab" style="display:none">
+                            <h6><i class="fas fa-ruler-vertical text-primary"></i> فاصله ماهالانوبی (D²)</h6>
+                            <p class="text-muted small">تشخیص نمونه‌های پرت چندمتغیره با آستانه توزیع χ²</p>
+                            <div class="row g-2 mb-3">
+                                <div class="col-md-3">
+                                    <label>سطح اطمینان آستانه χ²:</label>
+                                    <select id="mahaConfidence" class="form-control form-control-custom">
+                                        <option value="0.95">95%</option>
+                                        <option value="0.975" selected>97.5%</option>
+                                        <option value="0.99">99%</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3 d-flex align-items-end">
+                                    <button class="btn btn-custom" onclick="processMahalanobis()">
+                                        <i class="fas fa-play"></i> اجرا
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="loading-spinner" id="mahalanobisLoading">
+                                <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
+                                <p>در حال پردازش...</p>
+                            </div>
+                            <div class="result-box" id="mahalanobisResult"></div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Tab 9: Duplicates QC -->
+                <div class="tab-pane fade" id="tab-duplicates" role="tabpanel">
+                    <div class="tab-card">
+                        <h5><i class="fas fa-clipboard-check text-info"></i> تحلیل داده‌های تکراری (Duplicate QC)</h5>
+                        <p class="text-muted small">ارزیابی کیفیت آنالیز آزمایشگاه با RPD و نمودارهای Thompson-Howarth. اگر فایل شما شیت‌های «Duplicate Samples» و «Duplicate_Data» داشته باشد، زوج‌ها بر اساس شناسه نمونه تطبیق داده می‌شوند؛ در غیر این صورت می‌توانید از زوج‌های هم‌جوار (ردیف فرد/زوج) استفاده کنید.</p>
+                        <div id="dupSheetWarning" class="alert alert-warning py-2" style="display:none"></div>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-3">
+                                <label>منبع زوج‌ها:</label>
+                                <select id="dupSource" class="form-control form-control-custom">
+                                    <option value="original">شیت‌های Duplicate فایل</option>
+                                    <option value="auto">زوج‌های هم‌جوار (ردیف فرد/زوج)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label>حداکثر عناصر:</label>
+                                <input type="number" id="dupMaxElements" class="form-control form-control-custom" value="20" min="1" max="100">
+                            </div>
+                            <div class="col-md-2">
+                                <label>ضریب &lt;:</label>
+                                <input type="number" id="dupLeftCoe" class="form-control form-control-custom" value="0.75" step="0.05" min="0">
+                            </div>
+                            <div class="col-md-2">
+                                <label>ضریب &gt;:</label>
+                                <input type="number" id="dupRightCoe" class="form-control form-control-custom" value="1.25" step="0.05" min="0">
+                            </div>
+                            <div class="col-md-3 d-flex align-items-end">
+                                <button class="btn btn-custom" onclick="processDuplicates()">
+                                    <i class="fas fa-play"></i> اجرای تحلیل
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label>عناصر (خالی = حداکثر عناصر پرمجموعه):</label>
+                            <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                                <input type="text" id="dupElementFilter" class="form-control form-control-custom" style="max-width:260px" placeholder="جست‌وجوی نام عنصر..." oninput="filterDupElements()">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectDupElements(true)">انتخاب همه</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectDupElements(false)">حذف انتخاب</button>
+                                <span class="text-muted small" id="dupElementCount">0 از 0 عنصر انتخاب شده</span>
+                            </div>
+                            <div id="dupElementsBox" class="border rounded p-2" style="max-height:160px; overflow-y:auto; display:flex; flex-wrap:wrap; gap:4px 18px;">
+                                <span class="text-muted small">پس از آپلود فایل، عناصر شیت Duplicate نمایش داده می‌شوند.</span>
+                            </div>
+                        </div>
+                        <div class="loading-spinner" id="duplicatesLoading">
+                            <i class="fas fa-spinner fa-spin fa-2x text-primary"></i>
+                            <p>در حال تحلیل داده‌های تکراری...</p>
+                        </div>
+                        <div class="result-box" id="duplicatesResult"></div>
                     </div>
                 </div>
 
@@ -918,10 +1117,13 @@
                     populateSheetSelectForCoordinates(data.sheet_names, data.default_sheet);
                     if (data.columns) {
                         populateCoordinateSelects(data.columns);
+                        populatePlotElements(data.columns);
                     }
-                    enableTabs(['censored', 'outliers', 'anomaly', 'statistics', 'plots', 'normalization', 'multifactor']);
+                    enableTabs(['censored', 'outliers', 'anomaly', 'statistics', 'plots', 'normalization', 'multifactor', 'duplicates']);
                     updatePipelineStatus({ steps: {} });
                     showAlert(data.message, 'success');
+                    // بررسی شیت‌های Duplicate و پر کردن باکس عناصر
+                    checkDuplicateSheets();
                     // ماندن در صفحه آپلود برای انتخاب مختصات X و Y
                 } else {
                     showAlert(data.error, 'danger');
@@ -994,6 +1196,7 @@
         .then(data => {
             if (data.success && data.columns) {
                 populateCoordinateSelects(data.columns);
+                populatePlotElements(data.columns);
             }
         })
         .catch(() => showAlert('خطا در خواندن ستون‌ها', 'danger'));
@@ -1409,6 +1612,59 @@
         return html;
     }
 
+    // --- انتخاب عناصر برای نقشه‌ها ---
+    function populatePlotElements(cols) {
+        const box = document.getElementById('plotsElementsBox');
+        if (!box) return;
+        if (!cols || !cols.length) {
+            box.innerHTML = '<span class="text-muted small">لیست عناصر در دسترس نیست.</span>';
+            return;
+        }
+        let html = '';
+        cols.forEach((c, i) => {
+            html += `<div class="plot-element-item" style="min-width:120px">
+                <div class="form-check">
+                    <input class="form-check-input plot-element" type="checkbox" id="plotEl${i}" value="${c}" onchange="updatePlotElementCount()">
+                    <label class="form-check-label" for="plotEl${i}">${c}</label>
+                </div>
+            </div>`;
+        });
+        box.innerHTML = html;
+        updatePlotElementCount();
+    }
+
+    function filterPlotElements() {
+        const q = document.getElementById('plotsElementFilter').value.trim().toLowerCase();
+        document.querySelectorAll('.plot-element-item').forEach(item => {
+            const lbl = (item.querySelector('label') || {}).textContent || '';
+            item.style.display = lbl.toLowerCase().includes(q) ? '' : 'none';
+        });
+    }
+
+    function selectPlotElements(all) {
+        document.querySelectorAll('.plot-element').forEach(cb => { cb.checked = all; });
+        updatePlotElementCount();
+    }
+
+    function updatePlotElementCount() {
+        const all = document.querySelectorAll('.plot-element').length;
+        const sel = document.querySelectorAll('.plot-element:checked').length;
+        const el = document.getElementById('plotsElementCount');
+        if (el) el.textContent = `${sel} از ${all} عنصر انتخاب شده`;
+    }
+
+    function getSelectedPlotElements() {
+        return Array.from(document.querySelectorAll('.plot-element:checked')).map(cb => cb.value);
+    }
+
+    function togglePlotMethodOptions() {
+        const method = document.getElementById('plotsInterpolation').value;
+        const idwBox = document.getElementById('plotsIdwOptions');
+        const krigBox = document.getElementById('plotsKrigingOptions');
+        if (idwBox) idwBox.style.display = method === 'idw' ? '' : 'none';
+        if (krigBox) krigBox.style.display = method === 'kriging' ? '' : 'none';
+    }
+
     function processPlots() {
         if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
         const loading = document.getElementById('plotsLoading');
@@ -1416,14 +1672,19 @@
         loading.style.display = 'block';
         resultBox.style.display = 'none';
 
+        const interp = document.getElementById('plotsInterpolation').value;
         fetch('/process_plots', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 session_id: sessionId,
                 source: document.getElementById('plotsSource').value,
-                interpolation: document.getElementById('plotsInterpolation').value,
-                cmap: document.getElementById('plotsCmap').value
+                interpolation: interp,
+                cmap: document.getElementById('plotsCmap').value,
+                elements: getSelectedPlotElements(),
+                idw_k: parseInt(document.getElementById('plotsIdwK').value) || 12,
+                kriging_method: document.getElementById('plotsKrigingMethod') ? document.getElementById('plotsKrigingMethod').value : 'ordinary',
+                kriging_variogram: document.getElementById('plotsKrigingVariogram') ? document.getElementById('plotsKrigingVariogram').value : 'spherical'
             })
         })
         .then(r => {
@@ -1439,7 +1700,7 @@
                 refreshSessionStatus();
             } else showAlert(data.error, 'danger');
         })
-        .catch(() => { loading.style.display = 'none'; showAlert('خطا در رسم نمودار', 'danger'); });
+        .catch(e => { loading.style.display = 'none'; showAlert('خطا در رسم نمودار: ' + (e.message || e), 'danger'); });
     }
 
     // --- Result builders ---
@@ -1514,6 +1775,154 @@
             <p class="text-muted small">منبع: ${data.input_source} — X: ${data.x_column}, Y: ${data.y_column}</p>
             ${filesHtml}
         `;
+    }
+
+    // --- Duplicates QC ---
+    function checkDuplicateSheets() {
+        if (!sessionId) return;
+        fetch('/duplicate_sheets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId })
+        })
+        .then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); })
+        .then(data => {
+            const warn = document.getElementById('dupSheetWarning');
+            const box = document.getElementById('dupElementsBox');
+            if (data.has_duplicate_sheets) {
+                warn.style.display = 'none';
+                document.getElementById('dupSource').value = 'original';
+                populateDupElements(data.elements, data.n_pairs);
+            } else {
+                warn.style.display = 'block';
+                warn.innerHTML = '<i class="fas fa-info-circle"></i> شیت‌های «Duplicate Samples» و «Duplicate_Data» در فایل یافت نشد. می‌توانید از گزینه «زوج‌های هم‌جوار» استفاده کنید یا فایل با شیت‌های استاندارد آپلود کنید. شیت‌های موجود: ' + (data.available_sheets || []).join(', ');
+                box.innerHTML = '<span class="text-muted small">برای زوج‌های هم‌جوار، عناصر پس از اجرا از داده پردازش‌شده استخراج می‌شوند.</span>';
+            }
+        })
+        .catch(() => {});
+    }
+
+    function populateDupElements(elements, nPairs) {
+        const box = document.getElementById('dupElementsBox');
+        box.innerHTML = '';
+        if (!elements || !elements.length) {
+            box.innerHTML = '<span class="text-muted small">عنصری در شیت Duplicate یافت نشد.</span>';
+            updateDupElementCount();
+            return;
+        }
+        elements.forEach(el => {
+            const label = document.createElement('label');
+            label.className = 'form-check-label';
+            label.style.marginRight = '12px';
+            const cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.className = 'form-check-input dup-element';
+            cb.value = el;
+            cb.checked = false;
+            cb.onchange = updateDupElementCount;
+            label.appendChild(cb);
+            label.appendChild(document.createTextNode(' ' + el));
+            box.appendChild(label);
+        });
+        if (nPairs) {
+            const info = document.createElement('span');
+            info.className = 'text-muted small ms-2';
+            info.textContent = `(${nPairs} زوج)`;
+            box.appendChild(info);
+        }
+        updateDupElementCount();
+    }
+
+    function filterDupElements() {
+        const q = (document.getElementById('dupElementFilter').value || '').toLowerCase();
+        document.querySelectorAll('.dup-element').forEach(cb => {
+            const label = cb.closest('label');
+            label.style.display = cb.value.toLowerCase().includes(q) ? '' : 'none';
+        });
+    }
+
+    function selectDupElements(all) {
+        document.querySelectorAll('.dup-element').forEach(cb => {
+            if (cb.closest('label').style.display !== 'none') cb.checked = all;
+        });
+        updateDupElementCount();
+    }
+
+    function updateDupElementCount() {
+        const all = document.querySelectorAll('.dup-element').length;
+        const sel = document.querySelectorAll('.dup-element:checked').length;
+        const el = document.getElementById('dupElementCount');
+        if (el) el.textContent = `${sel} از ${all} عنصر انتخاب شده`;
+    }
+
+    function processDuplicates() {
+        if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
+        const loading = document.getElementById('duplicatesLoading');
+        const resultBox = document.getElementById('duplicatesResult');
+        loading.style.display = 'block';
+        resultBox.style.display = 'none';
+
+        const elements = Array.from(document.querySelectorAll('.dup-element:checked')).map(cb => cb.value);
+        fetch('/process_duplicates', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                source: document.getElementById('dupSource').value,
+                elements: elements,
+                max_elements: parseInt(document.getElementById('dupMaxElements').value) || 20,
+                left_coe: parseFloat(document.getElementById('dupLeftCoe').value) || undefined,
+                right_coe: parseFloat(document.getElementById('dupRightCoe').value) || undefined
+            })
+        })
+        .then(r => {
+            if (!r.ok) return r.json().then(j => { throw new Error(j.error || r.statusText); });
+            return r.json();
+        })
+        .then(data => {
+            loading.style.display = 'none';
+            if (data.success) {
+                showAlert(data.message, 'success');
+                resultBox.style.display = 'block';
+                resultBox.innerHTML = buildDuplicatesResult(data);
+                refreshSessionStatus();
+            } else showAlert(data.error, 'danger');
+        })
+        .catch(e => { loading.style.display = 'none'; showAlert('خطا در تحلیل داده‌های تکراری: ' + (e.message || e), 'danger'); });
+    }
+
+    function buildDuplicatesResult(data) {
+        let html = `
+            <h6><i class="fas fa-check-circle text-success"></i> تحلیل انجام شد</h6>
+            <p class="text-muted small">منبع: ${data.input_source} — زوج‌ها: ${data.pair_source} — کل زوج‌ها: ${data.n_pairs_total}</p>`;
+
+        // خلاصه کیفیت
+        const qc = data.quality_counts || {};
+        html += '<div class="stats-grid mb-3">';
+        ['خوب', 'قابل قبول', 'ضعیف'].forEach(cat => {
+            const color = cat === 'خوب' ? 'success' : (cat === 'قابل قبول' ? 'warning' : 'danger');
+            html += `<div class="stat-item"><div class="stat-value text-${color}">${qc[cat] || 0}</div><div class="stat-label">${cat}</div></div>`;
+        });
+        html += `<div class="stat-item"><div class="stat-value">${(data.elements || []).length}</div><div class="stat-label">عنصر تحلیل‌شده</div></div>`;
+        html += '</div>';
+
+        // جدول عناصر
+        if (data.stats && data.stats.length) {
+            html += '<div style="max-height:320px; overflow:auto"><table class="table table-sm table-hover"><thead><tr>' +
+                '<th>عنصر</th><th>زوج‌ها</th><th>میانگین RPD</th><th>میانه</th><th>انحراف معیار</th><th>بیشتر از ۱۰٪</th><th>بیشتر از ۲۰٪</th><th>کیفیت</th></tr></thead><tbody>';
+            data.stats.forEach(s => {
+                const badge = s.Quality_Category === 'خوب' ? 'success' : (s.Quality_Category === 'قابل قبول' ? 'warning' : 'danger');
+                html += `<tr><td><strong>${s.Element}</strong></td><td>${s.N_Pairs}</td><td>${s.Mean_RPD}%</td><td>${s.Median_RPD}%</td><td>${s.Std_RPD}</td>` +
+                    `<td>${s.Percent_Above_10}%</td><td>${s.Percent_Above_20}%</td><td><span class="badge bg-${badge}">${s.Quality_Category}</span></td></tr>`;
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // نمودار خلاصه + دانلودها
+        html += `<div class="mt-3">${dlLink('output/duplicates/summary_mean_rpd.png', 'نمودار خلاصه RPD')}` +
+            `${dlLink(data.output_file, 'فایل اکسل (۳ شیت)')}</div>`;
+        html += '<p class="text-muted small mt-2">نمودارهای هر عنصر (pairs / Thompson-Howarth / comparison / RPD hist) در مسیر output/duplicates/ جلسه ذخیره شده‌اند.</p>';
+        return html;
     }
 
     function buildAnomalyResult(data) {
@@ -1803,6 +2212,203 @@
             <h6><i class="fas fa-check-circle text-success"></i> K-Means (K=${data.n_clusters})</h6>
             <p class="text-muted small">منبع: ${data.input_source} — ${data.n_samples} نمونه — Inertia: ${data.inertia} — ${silText}</p>
             ${statsHtml}
+            ${plotsHtml(data.generated_plots, '07_multifactor_plots')}
+            ${dlLink(data.output_file, 'دانلود فایل اکسل')}
+        `;
+    }
+
+    // --- Factor Analysis (Phase 2) ---
+    function processFactorAnalysis() {
+        if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
+        const loading = document.getElementById('factorLoading');
+        const resultBox = document.getElementById('factorResult');
+        loading.style.display = 'block';
+        resultBox.style.display = 'none';
+        const nF = document.getElementById('faNFactors').value;
+        fetch('/process_factor_analysis', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                source: document.getElementById('multifactorSource').value,
+                rotation: document.getElementById('faRotation').value,
+                n_factors: nF ? parseInt(nF) : null
+            })
+        })
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
+        .then(data => {
+            loading.style.display = 'none';
+            if (data.success) {
+                resultBox.style.display = 'block';
+                resultBox.innerHTML = buildFactorResult(data);
+                refreshSessionStatus();
+            } else showAlert(data.error, 'danger');
+        })
+        .catch(e => { loading.style.display = 'none'; showAlert('خطا در پردازش: ' + (e.message || e), 'danger'); });
+    }
+
+    function buildFactorResult(data) {
+        let loadHtml = '';
+        const factorCols = data.factor_names || [];
+        if (data.loadings && data.loadings.length) {
+            let head = '<tr><th>ستون</th>';
+            factorCols.forEach(f => { head += `<th>${f}</th>`; });
+            head += '<th>جامعیت</th><th>فاکتور اصلی</th></tr>';
+            loadHtml = `<table class="table table-sm mt-2"><thead>${head}</thead><tbody>`;
+            data.loadings.forEach(row => {
+                let cells = `<td>${row['ستون']}</td>`;
+                factorCols.forEach(f => {
+                    const v = row[f];
+                    const cls = (v != null && Math.abs(v) >= 0.6) ? 'fw-bold text-success' : '';
+                    cells += `<td class="${cls}">${v != null ? v : '-'}</td>`;
+                });
+                cells += `<td>${row['جامعیت']}</td><td>${row['فاکتور اصلی']}</td>`;
+                loadHtml += `<tr>${cells}</tr>`;
+            });
+            loadHtml += '</tbody></table>';
+        }
+        let varHtml = '';
+        if (data.variance && data.variance.length) {
+            varHtml = '<table class="table table-sm mt-2"><thead><tr><th>فاکتور</th><th>مجموع مربع بارگذاری</th><th>درصد واریانس</th><th>تجمعی %</th></tr></thead><tbody>';
+            data.variance.forEach(v => {
+                varHtml += `<tr><td>${v['فاکتور']}</td><td>${v['بارگذاری مجموع مربع']}</td><td>${v['درصد واریانس (%)']}</td><td>${v['تجمعی (%)']}</td></tr>`;
+            });
+            varHtml += '</tbody></table>';
+        }
+        return `
+            <h6><i class="fas fa-check-circle text-success"></i> تحلیل فاکتوری — ${data.n_factors} فاکتور (${data.rotation})</h6>
+            <p class="text-muted small">منبع: ${data.input_source} — ${data.analyzed_columns} متغیر — ${data.n_samples} نمونه</p>
+            <h6 class="mt-3">بارگذاری فاکتورها:</h6>${loadHtml}
+            <h6 class="mt-3">توضیح واریانس:</h6>${varHtml}
+            ${plotsHtml(data.generated_plots, '07_multifactor_plots')}
+            ${dlLink(data.output_file, 'دانلود فایل اکسل')}
+        `;
+    }
+
+    // --- Element Association (Phase 2) ---
+    function processElementAssociation() {
+        if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
+        const loading = document.getElementById('associationLoading');
+        const resultBox = document.getElementById('associationResult');
+        loading.style.display = 'block';
+        resultBox.style.display = 'none';
+        fetch('/process_element_association', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                source: document.getElementById('multifactorSource').value,
+                method: document.getElementById('assocMethod').value,
+                min_corr: parseFloat(document.getElementById('assocMinCorr').value)
+            })
+        })
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
+        .then(data => {
+            loading.style.display = 'none';
+            if (data.success) {
+                resultBox.style.display = 'block';
+                resultBox.innerHTML = buildAssociationResult(data);
+                refreshSessionStatus();
+            } else showAlert(data.error, 'danger');
+        })
+        .catch(e => { loading.style.display = 'none'; showAlert('خطا در پردازش: ' + (e.message || e), 'danger'); });
+    }
+
+    function buildAssociationResult(data) {
+        let groupsHtml = '';
+        if (data.group_details && data.group_details.length) {
+            groupsHtml = '<table class="table table-sm mt-2"><thead><tr><th>گروه</th><th>تعداد</th><th>اعضا</th></tr></thead><tbody>';
+            data.group_details.forEach(g => {
+                groupsHtml += `<tr><td>${g.گروه}</td><td>${g.تعداد}</td><td>${g.اعضا}</td></tr>`;
+            });
+            groupsHtml += '</tbody></table>';
+        } else {
+            groupsHtml = '<p class="text-muted small mt-2">هیچ گروه‌ای با این آستانه یافت نشد — آستانه را کمتر کنید.</p>';
+        }
+        let pairsHtml = '';
+        if (data.pairs && data.pairs.length) {
+            pairsHtml = '<table class="table table-sm mt-2"><thead><tr><th>ستون ۱</th><th>ستون ۲</th><th>همبستگی</th></tr></thead><tbody>';
+            data.pairs.forEach(p => {
+                pairsHtml += `<tr><td>${p['ستون ۱']}</td><td>${p['ستون ۲']}</td><td>${p.همبستگی}</td></tr>`;
+            });
+            pairsHtml += '</tbody></table>';
+        }
+        return `
+            <h6><i class="fas fa-check-circle text-success"></i> گروه‌بندی عناصر (${data.method}, |r| ≥ ${data.min_corr})</h6>
+            <p class="text-muted small">منبع: ${data.input_source} — ${data.n_pairs} جفت همبستگی قوی — ${data.group_details ? data.group_details.length : 0} گروه</p>
+            <h6 class="mt-3">گروه‌ها:</h6>${groupsHtml}
+            <details class="mt-2"><summary class="fw-bold" style="cursor:pointer">جفت‌های قوی (${data.n_pairs} مورد)</summary>${pairsHtml}</details>
+            ${plotsHtml(data.generated_plots, '07_multifactor_plots')}
+            ${dlLink(data.output_file, 'دانلود فایل اکسل')}
+        `;
+    }
+
+    // --- Mahalanobis Distance (Phase 2) ---
+    function processMahalanobis() {
+        if (!sessionId) { showAlert('ابتدا فایل آپلود کنید', 'warning'); return; }
+        const loading = document.getElementById('mahalanobisLoading');
+        const resultBox = document.getElementById('mahalanobisResult');
+        loading.style.display = 'block';
+        resultBox.style.display = 'none';
+        fetch('/process_mahalanobis', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                source: document.getElementById('multifactorSource').value,
+                confidence: parseFloat(document.getElementById('mahaConfidence').value)
+            })
+        })
+        .then(r => {
+            if (!r.ok) return r.text().then(t => { throw new Error(t || r.statusText); });
+            return r.json();
+        })
+        .then(data => {
+            loading.style.display = 'none';
+            if (data.success) {
+                resultBox.style.display = 'block';
+                resultBox.innerHTML = buildMahalanobisResult(data);
+                refreshSessionStatus();
+            } else showAlert(data.error, 'danger');
+        })
+        .catch(e => { loading.style.display = 'none'; showAlert('خطا در پردازش: ' + (e.message || e), 'danger'); });
+    }
+
+    function buildMahalanobisResult(data) {
+        let statsHtml = '<div class="stats-grid">';
+        statsHtml += `<div class="stat-item"><div class="stat-value">${data.threshold}</div><div class="stat-label">آستانه D²</div></div>`;
+        statsHtml += `<div class="stat-item"><div class="stat-value">${data.max_d2}</div><div class="stat-label">حداکثر D²</div></div>`;
+        statsHtml += `<div class="stat-item"><div class="stat-value">${data.median_d2}</div><div class="stat-label">میانه D²</div></div>`;
+        statsHtml += `<div class="stat-item"><div class="stat-value">${data.n_anomaly}</div><div class="stat-label">نمونه پرت</div></div>`;
+        statsHtml += `<div class="stat-item"><div class="stat-value">${data.anomaly_percent}%</div><div class="stat-label">درصد پرت</div></div>`;
+        statsHtml += '</div>';
+        let topHtml = '';
+        if (data.top_rows && data.top_rows.length) {
+            const idKeys = Object.keys(data.top_rows[0]).filter(k => !['ردیف', 'D2', 'p-value', 'آنومالی'].includes(k));
+            let head = '<tr>';
+            idKeys.forEach(k => { head += `<th>${k}</th>`; });
+            head += '<th>D²</th><th>p-value</th><th>پرت</th></tr>';
+            topHtml = `<table class="table table-sm mt-2"><thead>${head}</thead><tbody>`;
+            data.top_rows.forEach(r => {
+                let cells = '';
+                idKeys.forEach(k => { cells += `<td>${r[k] != null ? r[k] : '-'}</td>`; });
+                const cls = r['آنومالی'] === 'بله' ? 'fw-bold text-danger' : '';
+                cells += `<td>${r.D2}</td><td>${r['p-value']}</td><td class="${cls}">${r['آنومالی']}</td>`;
+                topHtml += `<tr>${cells}</tr>`;
+            });
+            topHtml += '</tbody></table>';
+        }
+        return `
+            <h6><i class="fas fa-check-circle text-success"></i> فاصله ماهالانوبی — آستانه χ²(${data.confidence})</h6>
+            <p class="text-muted small">منبع: ${data.input_source} — ${data.analyzed_columns} متغیر — ${data.n_samples} نمونه</p>
+            ${statsHtml}
+            <h6 class="mt-3">۱۰ نمونه با بالاترین D²:</h6>${topHtml}
             ${plotsHtml(data.generated_plots, '07_multifactor_plots')}
             ${dlLink(data.output_file, 'دانلود فایل اکسل')}
         `;

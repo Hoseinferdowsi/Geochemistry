@@ -1,14 +1,20 @@
 from flask import Flask, render_template, request, send_file, jsonify
 from flask.json.provider import DefaultJSONProvider
 import os
+import re
 import uuid
 import zipfile
 import io
 import math
+import secrets
+import shutil
+import threading
+import time
 import numpy as np
 from datetime import datetime
 from werkzeug.utils import secure_filename
 
+import config
 from processing_services import (
     get_session_dir,
     get_session_upload_path,
@@ -18,12 +24,16 @@ from processing_services import (
     process_outliers,
     process_normalization,
     process_plots,
+    process_duplicate_qc,
     process_anomaly_separation,
     process_column_statistics,
     process_correlation_matrix,
     process_pca,
     process_hierarchical_clustering,
     process_kmeans,
+    process_factor_analysis,
+    process_element_association,
+    process_mahalanobis,
 )
 
 
@@ -62,10 +72,11 @@ class SafeJSONProvider(DefaultJSONProvider):
 app = Flask(__name__)
 app.json_provider_class = SafeJSONProvider
 app.json = SafeJSONProvider(app)
-app.secret_key = 'geochemistry_analysis_secret_key_2024'
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
-ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
+# کلید session و سایر تنظیمات از config.py (قابل بازنویسی با متغیر محیطی)
+app.secret_key = config.SECRET_KEY
+app.config['UPLOAD_FOLDER'] = config.UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
+ALLOWED_EXTENSIONS = config.ALLOWED_EXTENSIONS
 
 
 def allowed_file(filename):
@@ -206,8 +217,8 @@ def process_censored_data_route():
         if not os.path.exists(get_session_upload_path(session_id)):
             return jsonify({'error': 'فایل جلسه یافت نشد'}), 404
 
-        left_coe = float(data.get('left_coe', 0.75))
-        right_coe = float(data.get('right_coe', 1.25))
+        left_coe = float(data.get('left_coe', config.CENSOR_LEFT_COEFFICIENT))
+        right_coe = float(data.get('right_coe', config.CENSOR_RIGHT_COEFFICIENT))
         if left_coe <= 0 or right_coe <= 0:
             return jsonify({'error': 'ضرایب تعدیل باید عدد مثبت باشند'}), 400
 
@@ -360,13 +371,26 @@ def process_plots_route():
         interpolation = data.get('interpolation', 'idw')
         cmap = data.get('cmap', 'viridis')
         elements = data.get('elements')
+        try:
+            idw_k = int(data.get('idw_k', 12))
+        except (TypeError, ValueError):
+            idw_k = 12
+        idw_k = max(1, min(idw_k, 50))
 
         if not session_id:
             return jsonify({'error': 'شناسه جلسه الزامی است'}), 400
 
+        kriging_method = data.get('kriging_method', 'ordinary')
+        if kriging_method not in ('ordinary', 'universal'):
+            kriging_method = 'ordinary'
+        kriging_variogram = data.get('kriging_variogram', 'spherical')
+        if kriging_variogram not in ('spherical', 'exponential', 'gaussian', 'linear'):
+            kriging_variogram = 'spherical'
+
         result = process_plots(
             session_id, source=source, interpolation=interpolation,
-            cmap=cmap, elements=elements,
+            cmap=cmap, elements=elements, idw_k=idw_k,
+            kriging_method=kriging_method, kriging_variogram=kriging_variogram,
         )
         return jsonify({
             'success': True,
@@ -378,10 +402,117 @@ def process_plots_route():
         return jsonify({'error': f'خطا در رسم نمودارها: {str(e)}'}), 500
 
 
+@app.route('/process_duplicates', methods=['POST'])
+def process_duplicates_route():
+    """تحلیل داده‌های تکراری (Duplicate QC) — شیت‌های Duplicate یا زوج‌های هم‌جوار."""
+    try:
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
+        if not session_id:
+            return jsonify({'error': 'شناسه جلسه الزامی است'}), 400
+
+        source = data.get('source', 'original')
+        if source not in ('original', 'auto'):
+            source = 'original'
+        sheet_name = data.get('sheet_name')
+        elements = data.get('elements') or None
+        try:
+            max_elements = int(data.get('max_elements', 20))
+        except (TypeError, ValueError):
+            max_elements = 20
+        max_elements = max(1, min(max_elements, 100))
+        left_coe = data.get('left_coe')
+        right_coe = data.get('right_coe')
+
+        result = process_duplicate_qc(
+            session_id, sheet_name=sheet_name, source=source,
+            elements=elements, left_coe=left_coe, right_coe=right_coe,
+            max_elements=max_elements,
+        )
+        quality_counts = {}
+        for s in result.get('stats', []):
+            cat = s.get('Quality_Category', 'ضعیف')
+            quality_counts[cat] = quality_counts.get(cat, 0) + 1
+
+        return jsonify({
+            'success': True,
+            'message': f"تحلیل {result['n_pairs_total']} زوج تکراری برای {len(result['elements'])} عنصر انجام شد",
+            'session_id': session_id,
+            'quality_counts': quality_counts,
+            **result,
+        })
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': f'خطا در تحلیل داده‌های تکراری: {str(e)}'}), 500
+
+
+@app.route('/duplicate_sheets', methods=['POST'])
+def duplicate_sheets_route():
+    """بررسی وجود شیت‌های Duplicate در فایل آپلودی و بازگرداندن عناصر آن‌ها."""
+    try:
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
+        if not session_id:
+            return jsonify({'error': 'شناسه جلسه الزامی است'}), 400
+
+        import pandas as pd
+        filepath = get_session_upload_path(session_id)
+        if not os.path.exists(filepath):
+            return jsonify({'error': 'فایل آپلودی یافت نشد'}), 404
+
+        excel = pd.ExcelFile(filepath)
+        available = excel.sheet_names
+        ds_sheet = next((s for s in ('Duplicate Samples', 'Duplicate_Samples', 'DuplicateSamples') if s in available), None)
+        dd_sheet = next((s for s in ('Duplicate_Data', 'Duplicate Data', 'DuplicateData') if s in available), None)
+        elements = []
+        n_pairs = 0
+        if ds_sheet and dd_sheet:
+            dd_df = pd.read_excel(filepath, sheet_name=dd_sheet, nrows=50)
+            elements = [c for c in dd_df.columns if c != 'Sample_ID']
+            ds_df = pd.read_excel(filepath, sheet_name=ds_sheet)
+            n_pairs = len(ds_df)
+
+        return jsonify({
+            'success': True,
+            'has_duplicate_sheets': bool(ds_sheet and dd_sheet),
+            'samples_sheet': ds_sheet,
+            'data_sheet': dd_sheet,
+            'elements': elements,
+            'n_pairs': n_pairs,
+            'available_sheets': available,
+        })
+    except Exception as e:
+        return jsonify({'error': f'خطا در بررسی شیت‌های تکراری: {str(e)}'}), 500
+
+
+SESSION_ID_RE = re.compile(r'^[A-Za-z0-9_\-]+$')
+
+
+def _valid_session_id(session_id):
+    """فقط شناسه‌های مجاز (بدون / و ..) پذیرفته می‌شوند."""
+    return bool(SESSION_ID_RE.match(session_id or ''))
+
+
+def _inside(base_dir, target_path):
+    """بررسی اینکه target_path بعد از resolve شدن داخل base_dir باشد (محافظت path traversal)."""
+    try:
+        base = os.path.realpath(base_dir)
+        target = os.path.realpath(target_path)
+        return os.path.commonpath([base, target]) == base
+    except ValueError:
+        return False
+
+
 @app.route('/download/<session_id>/<path:filename>')
 def download_session_file(session_id, filename):
     try:
-        file_path = os.path.join(get_session_dir(session_id), filename)
+        if not _valid_session_id(session_id):
+            return jsonify({'error': 'دسترسی غیرمجاز'}), 403
+        session_dir = get_session_dir(session_id)
+        file_path = os.path.join(session_dir, filename)
+        if not _inside(session_dir, file_path):
+            return jsonify({'error': 'دسترسی غیرمجاز'}), 403
         if not os.path.exists(file_path) or not os.path.isfile(file_path):
             return jsonify({'error': 'فایل یافت نشد'}), 404
         mimetype = (
@@ -397,18 +528,27 @@ def download_session_file(session_id, filename):
 @app.route('/download/<path:filename>')
 def download_file_legacy(filename):
     """سازگاری با مسیرهای قدیمی."""
-    for root, _, files in os.walk('output'):
-        if filename in files:
-            return send_file(os.path.join(root, filename), as_attachment=True)
-    for root, _, files in os.walk('sessions'):
-        if filename in files:
-            return send_file(os.path.join(root, filename), as_attachment=True)
+    # فقط نام فایل ساده مجاز است (نه مسیر با / یا ..)
+    safe_name = os.path.basename(filename)
+    if not safe_name or safe_name != filename:
+        return jsonify({'error': 'دسترسی غیرمجاز'}), 403
+    for base in ('output', 'sessions'):
+        if not os.path.isdir(base):
+            continue
+        base_real = os.path.realpath(base)
+        for root, _, files in os.walk(base_real):
+            if safe_name in files:
+                file_path = os.path.join(root, safe_name)
+                if _inside(base_real, file_path):
+                    return send_file(file_path, as_attachment=True)
     return jsonify({'error': 'فایل یافت نشد'}), 404
 
 
 @app.route('/download_all/<session_id>')
 def download_all_session_files(session_id):
     try:
+        if not _valid_session_id(session_id):
+            return jsonify({'error': 'دسترسی غیرمجاز'}), 403
         session_path = get_session_dir(session_id)
         if not os.path.exists(session_path):
             return jsonify({'error': 'جلسه یافت نشد'}), 404
@@ -515,8 +655,105 @@ def process_kmeans_route():
         return jsonify({'error': f'خطا در K-Means: {str(e)}'}), 500
 
 
+@app.route('/process_factor_analysis', methods=['POST'])
+def process_factor_analysis_route():
+    try:
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
+        source = data.get('source', 'auto')
+        rotation = data.get('rotation', 'varimax')
+        n_factors = int(data.get('n_factors')) if data.get('n_factors') else None
+        if not session_id:
+            return jsonify({'error': 'شناسه جلسه الزامی است'}), 400
+        result = process_factor_analysis(session_id, source=source, n_factors=n_factors, rotation=rotation)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': f'خطا در تحلیل فاکتوری: {str(e)}'}), 500
+
+
+@app.route('/process_element_association', methods=['POST'])
+def process_element_association_route():
+    try:
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
+        source = data.get('source', 'auto')
+        method = data.get('method', 'pearson')
+        min_corr = float(data.get('min_corr', 0.5))
+        if not session_id:
+            return jsonify({'error': 'شناسه جلسه الزامی است'}), 400
+        result = process_element_association(session_id, source=source, method=method, min_corr=min_corr)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': f'خطا در گروه‌بندی عناصر: {str(e)}'}), 500
+
+
+@app.route('/process_mahalanobis', methods=['POST'])
+def process_mahalanobis_route():
+    try:
+        data = request.get_json() or {}
+        session_id = data.get('session_id')
+        source = data.get('source', 'auto')
+        confidence = float(data.get('confidence', 0.975))
+        if not session_id:
+            return jsonify({'error': 'شناسه جلسه الزامی است'}), 400
+        result = process_mahalanobis(session_id, source=source, confidence=confidence)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': f'خطا در محاسبه فاصله ماهالانوبی: {str(e)}'}), 500
+
+
+# ==================================================
+# پاک‌سازی خودکار جلسات/آپلودهای قدیمی (باگ ۴)
+# ==================================================
+SESSION_TTL_DAYS = config.SESSION_TTL_DAYS
+_CLEANUP_STARTED = False
+
+
+def cleanup_old_data(ttl_days=None):
+    """حذف موارد قدیمی‌تر از TTL در پوشه‌های sessions/ و uploads/."""
+    ttl = (SESSION_TTL_DAYS if ttl_days is None else ttl_days) * 86400
+    cutoff = time.time() - ttl
+    removed = 0
+    for base in ('sessions', 'uploads'):
+        if not os.path.isdir(base):
+            continue
+        for name in os.listdir(base):
+            path = os.path.join(base, name)
+            try:
+                if os.path.getmtime(path) <= cutoff:
+                    if os.path.isdir(path):
+                        shutil.rmtree(path, ignore_errors=True)
+                    else:
+                        os.remove(path)
+                    removed += 1
+            except OSError:
+                continue
+    return removed
+
+
+def start_cleanup_scheduler(interval_hours=None):
+    """راه‌اندازی thread پس‌زمینه برای پاک‌سازی دوره‌ای (یکبار)."""
+    global _CLEANUP_STARTED
+    if _CLEANUP_STARTED:
+        return
+    _CLEANUP_STARTED = True
+    if interval_hours is None:
+        interval_hours = config.CLEANUP_INTERVAL_HOURS
+
+    def _loop():
+        while True:
+            try:
+                cleanup_old_data()
+            except Exception:
+                pass
+            time.sleep(interval_hours * 3600)
+
+    threading.Thread(target=_loop, daemon=True).start()
+
+
 if __name__ == '__main__':
-    os.makedirs('uploads', exist_ok=True)
-    os.makedirs('output', exist_ok=True)
-    os.makedirs('sessions', exist_ok=True)
-    app.run(debug=True, host='127.0.0.1', port=5001)
+    os.makedirs(config.UPLOAD_FOLDER, exist_ok=True)
+    os.makedirs(config.OUTPUT_FOLDER, exist_ok=True)
+    os.makedirs(config.SESSIONS_FOLDER, exist_ok=True)
+    start_cleanup_scheduler()
+    app.run(debug=config.DEBUG, host=config.HOST, port=config.PORT)

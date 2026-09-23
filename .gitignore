@@ -20,6 +20,7 @@ anomaly_analysis/
 element_distribution_maps/
 normalized_results/
 *.log
+*_output.txt
 
 # ===== سیستم‌عامل =====
 Thumbs.db
